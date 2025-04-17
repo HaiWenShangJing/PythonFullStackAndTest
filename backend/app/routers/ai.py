@@ -1,18 +1,48 @@
 import os
 import uuid
+import logging
 from typing import List, Optional
+from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
 import httpx
+from dotenv import load_dotenv, find_dotenv
 
 from backend.app.schemas import ChatRequest, ChatResponse
 
-router = APIRouter()
+# 配置日志
+logger = logging.getLogger(__name__)
 
-# Get OpenRouter API key from environment variable
+# 获取项目根目录
+BASE_DIR = Path(__file__).resolve().parent.parent.parent.parent
+ENV_FILE = BASE_DIR / ".env"
+
+# 尝试多种方式加载环境变量
+logger.info(f"Trying to load .env from: {ENV_FILE}")
+if ENV_FILE.exists():
+    logger.info(f".env file exists at {ENV_FILE}")
+    load_dotenv(dotenv_path=ENV_FILE)
+else:
+    logger.warning(f".env file not found at {ENV_FILE}")
+    # 尝试自动查找.env文件
+    dotenv_path = find_dotenv()
+    if dotenv_path:
+        logger.info(f"Found .env at {dotenv_path}")
+        load_dotenv(dotenv_path=dotenv_path)
+    else:
+        logger.warning("No .env file found. Using environment variables or defaults.")
+
+# 获取环境变量
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "testkey")
 OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
 
+# 打印API密钥前5个字符，用于调试
+if OPENROUTER_API_KEY != "testkey":
+    logger.info(f"Using API key: {OPENROUTER_API_KEY[:5]}...")
+else:
+    logger.warning("Using default API key (testkey)")
+
+router = APIRouter()
 
 @router.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):

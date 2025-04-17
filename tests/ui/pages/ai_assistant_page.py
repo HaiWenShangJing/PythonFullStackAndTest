@@ -3,12 +3,13 @@ from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
+from .base_page import BasePage
 
-class AIAssistantPage:
+
+class AIAssistantPage(BasePage):
     """Page Object Model for the AI Assistant page"""
     
     # Locators
-    SIDEBAR_NAVIGATION = (By.XPATH, "//div[contains(@class, 'st-emotion-cache')]//div[contains(@role, 'radio')]")
     PAGE_TITLE = (By.XPATH, "//h1[contains(text(), 'AI Assistant')]")
     MESSAGE_INPUT = (By.CSS_SELECTOR, "textarea[aria-label='Your message:']")
     SEND_BUTTON = (By.XPATH, "//button[contains(text(), 'Send Message')]")
@@ -17,23 +18,9 @@ class AIAssistantPage:
     AI_MESSAGES = (By.XPATH, "//div[contains(text(), 'AI:')]")
     LOADING_SPINNER = (By.CSS_SELECTOR, "div[data-testid='stSpinner']")
     
-    def __init__(self, driver: WebDriver, base_url: str):
-        self.driver = driver
-        self.base_url = base_url
-        self.wait = WebDriverWait(driver, 10)
-    
     def navigate(self):
         """Navigate to the AI Assistant page"""
-        self.driver.get(self.base_url)
-        
-        # Click on AI Assistant in the sidebar
-        sidebar_items = self.driver.find_elements(*self.SIDEBAR_NAVIGATION)
-        for item in sidebar_items:
-            if "AI Assistant" in item.text:
-                item.click()
-                break
-        
-        # Wait for page to load
+        super().navigate_to("AI Assistant")
         self.wait.until(EC.presence_of_element_located(self.PAGE_TITLE))
         return self
     

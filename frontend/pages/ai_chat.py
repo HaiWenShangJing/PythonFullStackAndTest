@@ -4,10 +4,14 @@ from typing import Dict, List, Optional
 
 import streamlit as st
 
-from frontend.streamlit_app import (
+from streamlit_app import (
     API_BASE_URL,
+    create_item,
+    delete_item,
+    fetch_items,
     initialize_session_state,
-    send_chat_message,
+    update_item,
+    send_message_to_ai,
 )
 
 
@@ -17,6 +21,8 @@ def ai_chat_page():
     
     # Initialize session state
     initialize_session_state()
+    if not hasattr(st.session_state, "items") or not isinstance(st.session_state.items, list):
+        st.session_state.items = []
     
     # Display chat history
     display_chat_history()
@@ -84,24 +90,19 @@ def chat_input():
             # Send message to API
             with st.spinner("AI思考中..."):
                 response = asyncio.run(
-                    send_chat_message(
-                        user_input,
-                        st.session_state.session_id,
-                        context
-                    )
+                    send_message_to_ai(user_input)
                 )
                 
                 if response:
-                    # Add AI response to chat history
                     st.session_state.chat_history.append(
-                        {"role": "assistant", "content": response["message"]}
+                        {"role": "assistant", "content": response}
                     )
                     
                     # Update session ID
                     st.session_state.session_id = str(response["session_id"])
                     
                     # Force a rerun to display the new message
-                    st.experimental_rerun()
+                    st.rerun()
 
 
 # Run the page

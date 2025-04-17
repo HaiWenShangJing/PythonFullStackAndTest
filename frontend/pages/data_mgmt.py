@@ -4,13 +4,14 @@ from typing import Dict, List, Optional
 
 import streamlit as st
 
-from frontend.streamlit_app import (
+from streamlit_app import (
     API_BASE_URL,
     create_item,
     delete_item,
     fetch_items,
     initialize_session_state,
     update_item,
+    send_message_to_ai,
 )
 
 
@@ -20,6 +21,8 @@ def data_management_page():
     
     # Initialize session state
     initialize_session_state()
+    if not hasattr(st.session_state, "items") or not isinstance(st.session_state.items, list):
+        st.session_state.items = []
     
     # Create tabs for different operations
     tab1, tab2, tab3 = st.tabs(["查看数据", "添加数据", "编辑/删除数据"])
@@ -35,42 +38,56 @@ def data_management_page():
 
 
 def view_items():
-    """Display all items in a table"""
-    st.subheader("所有数据项")
+    """Display items in a table format"""
     
-    # Refresh button
-    if st.button("刷新数据", key="refresh_items"):
-        st.session_state.items = []
+    # 使用临时变量并检查items类型
+    temp_items = st.session_state.get("items")
     
-    # Fetch items if not already in session state
-    if not st.session_state.items:
-        with st.spinner("加载数据中..."):
-            items, total = asyncio.run(fetch_items())
-            st.session_state.items = items
+    # 如果items是方法或者不是列表，重置为空列表
+    if callable(temp_items) or not isinstance(temp_items, list):
+        temp_items = []
+        # 同时更新session state
+        st.session_state["items"] = temp_items
     
-    # Display items in a table
-    if st.session_state.items:
-        # Convert to DataFrame for better display
-        items_data = [
-            {
+    # 现在使用temp_items而不是直接访问session_state
+    if not temp_items:
+        st.info("No items found. Create some using the form above.")
+        return
+    
+    # 使用临时变量创建数据
+    try:
+        items_data = []
+        for item in temp_items:
+            items_data.append({
                 "ID": item["id"],
-                "名称": item["name"],
-                "描述": item["description"] or "",
-                "创建时间": item["created_at"],
-                "更新时间": item["updated_at"],
-            }
-            for item in st.session_state.items
-        ]
+                "Name": item["name"],
+                "Description": item["description"] or "",
+                "Created": item["created_at"]
+            })
         
+        # 创建数据框并显示
         st.dataframe(items_data, use_container_width=True)
-        st.info(f"共 {len(st.session_state.items)} 条记录")
-    else:
-        st.info("暂无数据")
+    except Exception as e:
+        st.error(f"Error displaying items: {str(e)}")
+        # 如果出错，重置items为空列表
+        st.session_state["items"] = []
 
 
 def add_item_form():
     """Form for adding a new item"""
     st.subheader("添加新数据项")
+    
+    # Initialize form state if needed
+    if "form_submitted" not in st.session_state:
+        st.session_state.form_submitted = False
+    
+    # Reset form if previously submitted
+    if st.session_state.form_submitted:
+        # Use this approach to clear the form fields through rerun
+        st.session_state.form_submitted = False
+        st.session_state.add_name = ""
+        st.session_state.add_description = ""
+        st.rerun()
     
     with st.form("add_item_form"):
         name = st.text_input("名称", key="add_name")
@@ -87,29 +104,41 @@ def add_item_form():
                     
                     if new_item:
                         st.success(f"成功添加: {name}")
-                        # Clear form
-                        st.session_state.add_name = ""
-                        st.session_state.add_description = ""
+                        # Set flag to clear form on next render
+                        st.session_state.form_submitted = True
                         # Refresh items list
                         st.session_state.items = []
+                        st.rerun()
 
 
 def edit_delete_items():
     """Interface for editing and deleting items"""
     st.subheader("编辑/删除数据项")
     
-    # Fetch items if not already in session state
-    if not st.session_state.items:
+    # 使用临时变量并检查类型
+    temp_items = st.session_state.get("items")
+    
+    # 如果items是方法或者不是列表，重置为空列表
+    if callable(temp_items) or not isinstance(temp_items, list):
+        temp_items = []
+        # 同时更新session state
+        st.session_state["items"] = temp_items
+    
+    # Fetch items if needed
+    if not temp_items:
         with st.spinner("加载数据中..."):
             items, total = asyncio.run(fetch_items())
-            st.session_state.items = items
+            temp_items = items if isinstance(items, list) else []
+            st.session_state["items"] = temp_items
     
-    if not st.session_state.items:
+    if not temp_items:
         st.info("暂无数据可编辑")
         return
     
+    # 使用临时变量而非直接访问session_state
+    item_options = {f"{item['name']} (ID: {item['id']})": item for item in temp_items}
+    
     # Select an item to edit/delete
-    item_options = {f"{item['name']} (ID: {item['id']})": item for item in st.session_state.items}
     selected_item_key = st.selectbox(
         "选择要编辑/删除的数据项",
         options=list(item_options.keys()),

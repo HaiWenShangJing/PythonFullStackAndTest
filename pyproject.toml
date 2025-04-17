@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "A full-stack application with CRUD operations and AI chat capabilities"
 authors = ["Jack"]
 readme = "README.md"
+package-mode = false 
 
 [tool.poetry.dependencies]
 python = "^3.10"
@@ -15,9 +16,10 @@ asyncpg = "^0.30.0"
 streamlit = "^1.26.0"
 httpx = "^0.24.1"
 python-dotenv = "^1.0.0"
-pydantic = "^2.3.0"
+pydantic = {extras = ["all"], version = "^2.11.3"}
 pydantic-settings = "^2.0.3"
 loguru = "^0.7.0"
+email-validator = "^2.2.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.4.1"

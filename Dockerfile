@@ -1,4 +1,4 @@
-FROM python:3.10-slim
+FROM python:latest
 
 WORKDIR /app
 
@@ -20,7 +20,7 @@ COPY README.md .
 RUN poetry config virtualenvs.create false
 
 # Install dependencies
-RUN poetry install --no-interaction --no-ansi
+RUN poetry install --no-interaction --no-ansi --no-root
 
 # Copy application code
 COPY . .

@@ -1,11 +1,19 @@
 import os
 from typing import AsyncGenerator
+from pathlib import Path
 
+from dotenv import load_dotenv
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
 from backend.app.models import Base
 
+# 获取项目根目录
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
+ENV_FILE = BASE_DIR / ".env"
+
+# 使用绝对路径加载.env文件
+load_dotenv(dotenv_path=ENV_FILE)
 
 # Get database URL from environment variable with a fallback for development
 DATABASE_URL = os.environ.get(

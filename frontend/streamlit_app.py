@@ -1,10 +1,20 @@
 import os
 import uuid
 from typing import List, Optional, Tuple
+from pathlib import Path
 
 import httpx
 import streamlit as st
+from dotenv import load_dotenv
 from streamlit.delta_generator import DeltaGenerator
+
+# 获取项目根目录
+BASE_DIR = Path(__file__).resolve().parent.parent
+ENV_FILE = BASE_DIR / ".env"
+
+# 使用绝对路径加载.env文件
+print(f"Loading .env from: {ENV_FILE}")
+load_dotenv(dotenv_path=ENV_FILE)
 
 # API Configuration
 API_BASE_URL = os.environ.get("API_BASE_URL", "http://localhost:8000/api/v1")
@@ -18,8 +28,8 @@ def initialize_session_state():
     if "session_id" not in st.session_state:
         st.session_state.session_id = str(uuid.uuid4())
     
-    if "items" not in st.session_state:
-        st.session_state.items = []
+    if 'items' not in st.session_state:
+        st.session_state['items'] = []
 
 
 async def fetch_items() -> Tuple[List[dict], int]:
@@ -79,7 +89,7 @@ async def delete_item(item_id: str) -> bool:
             return False
 
 
-async def send_message_to_ai(message: str) -> str:
+async def send_message_to_ai(message: str) -> dict:
     """Send a message to the AI and get a response"""
     # Format context for the AI
     context = [
@@ -88,8 +98,18 @@ async def send_message_to_ai(message: str) -> str:
     
     # Add chat history as context (last 5 messages)
     for msg in st.session_state.chat_history[-5:]:
-        role = "user" if msg["is_user"] else "assistant"
-        context.append({"role": role, "content": msg["content"]})
+        # Add safety check to handle different message formats
+        if isinstance(msg, dict):
+            # If message has 'is_user' key, use it; otherwise try to determine from content or default to 'user'
+            if "is_user" in msg:
+                role = "user" if msg["is_user"] else "assistant" 
+            elif "role" in msg:
+                role = msg["role"]
+            else:
+                role = "user"  # Default role
+            
+            content = msg.get("content", "")
+            context.append({"role": role, "content": content})
     
     async with httpx.AsyncClient() as client:
         try:
@@ -105,12 +125,21 @@ async def send_message_to_ai(message: str) -> str:
             
             if response.status_code == 200:
                 data = response.json()
-                return data["message"]
+                return {
+                    "message": data["message"],
+                    "session_id": st.session_state.session_id
+                }
             else:
-                return f"Error: {response.text}"
+                return {
+                    "message": f"Error: {response.text}",
+                    "session_id": st.session_state.session_id
+                }
         
         except Exception as e:
-            return f"Error communicating with AI service: {str(e)}"
+            return {
+                "message": f"Error communicating with AI service: {str(e)}",
+                "session_id": st.session_state.session_id
+            }
 
 
 def display_dashboard():
@@ -118,11 +147,31 @@ def display_dashboard():
     st.title("Dashboard")
     st.write("Welcome to the Full-Stack AI CRUD Application!")
     
+    # Create a completely local copy - avoid the method reference problem
+    try:
+        # Access through dictionary notation instead of attribute notation
+        local_items = st.session_state["items"]
+        # Check if it's callable (a method)
+        if callable(local_items):
+            local_items = []
+        # Ensure it's a list
+        if not isinstance(local_items, list):
+            local_items = []
+    except:
+        local_items = []
+    
+    # Store back the fixed value
+    st.session_state["items"] = local_items
+    
     # Metrics row
     col1, col2, col3 = st.columns(3)
     
-    total_items = len(st.session_state.items)
-    total_chats = len([msg for msg in st.session_state.chat_history if msg["is_user"]])
+    total_items = len(local_items)  # Use local variable instead
+    
+    try:
+        total_chats = len([msg for msg in st.session_state.chat_history if isinstance(msg, dict) and msg.get("is_user", False)])
+    except:
+        total_chats = 0
     
     with col1:
         st.metric(label="Total Items", value=total_items)
@@ -133,12 +182,12 @@ def display_dashboard():
     with col3:
         st.metric(label="Active Session", value="Yes" if st.session_state.session_id else "No")
     
-    # Recent items
+    # Use the local variable throughout the function
     st.subheader("Recent Items")
-    if not st.session_state.items:
+    if not local_items:
         st.info("No items found. Go to the Data Management page to create some!")
     else:
-        for item in st.session_state.items[:5]:
+        for item in local_items[:5]:
             with st.expander(f"{item['name']}"):
                 st.write(f"**Description:** {item['description'] or 'No description'}")
                 st.write(f"**Created:** {item['created_at']}")
@@ -149,15 +198,26 @@ def display_dashboard():
         st.info("No chat history found. Go to the AI Assistant page to start a conversation!")
     else:
         for msg in st.session_state.chat_history[-4:]:
-            if msg["is_user"]:
-                st.write(f"🧑 **You:** {msg['content']}")
+            # 添加安全检查，确保存在is_user键
+            if isinstance(msg, dict):
+                if msg.get("is_user", False):
+                    st.write(f"🧑 **You:** {msg.get('content', '')}")
+                else:
+                    st.write(f"🤖 **AI:** {msg.get('content', '')}")
             else:
-                st.write(f"🤖 **AI:** {msg['content']}")
+                # 处理不是字典的情况
+                st.write(f"🤖 **Message:** {str(msg)}")
 
 
 def display_data_management():
     """Display the data management page"""
     st.title("Data Management")
+    
+    # 在顶部添加这段代码来修复items问题
+    temp_items = st.session_state.get("items")
+    if callable(temp_items) or not isinstance(temp_items, list):
+        temp_items = []
+        st.session_state["items"] = temp_items
     
     # Add new item form
     with st.expander("Add New Item", expanded=False):
@@ -174,15 +234,15 @@ def display_data_management():
     # Handle form submission (after rerun to avoid streamlit form issues)
     if hasattr(st.session_state, "form_submitted") and st.session_state.form_submitted:
         with st.spinner("Creating item..."):
-            result = create_item(
+            result = asyncio.run(create_item(
                 st.session_state.form_data["name"],
                 st.session_state.form_data["description"]
-            )
+            ))
             if result:
                 st.success("Item created successfully!")
                 # Refresh items list
-                items, _ = fetch_items()
-                st.session_state.items = items
+                items, _ = asyncio.run(fetch_items())
+                st.session_state.items = items if isinstance(items, list) else []
         
         # Reset form state
         del st.session_state.form_submitted
@@ -191,12 +251,12 @@ def display_data_management():
     # Display items table
     st.subheader("Items List")
     
-    if not st.session_state.items:
+    if not temp_items:  # 使用temp_items代替st.session_state.items
         st.info("No items found.")
     else:
         # Create a dataframe for display
         df_data = []
-        for item in st.session_state.items:
+        for item in temp_items:  # 使用temp_items代替st.session_state.items
             df_data.append({
                 "ID": item["id"],
                 "Name": item["name"],
@@ -211,9 +271,9 @@ def display_data_management():
         st.subheader("Item Actions")
         
         # Select an item
-        item_names = [f"{item['name']} ({item['id'][:8]}...)" for item in st.session_state.items]
+        item_names = [f"{item['name']} ({item['id'][:8]}...)" for item in temp_items]
         selected_item_idx = st.selectbox("Select an item", range(len(item_names)), format_func=lambda i: item_names[i])
-        selected_item = st.session_state.items[selected_item_idx]
+        selected_item = temp_items[selected_item_idx]
         
         # Action tabs
         tab1, tab2 = st.tabs(["Edit", "Delete"])
@@ -251,7 +311,7 @@ def display_data_management():
                 st.success("Item updated successfully!")
                 # Refresh items list
                 items, _ = fetch_items()
-                st.session_state.items = items
+                st.session_state.items = items if isinstance(items, list) else []
         
         # Reset update state
         del st.session_state.update_submitted
@@ -265,7 +325,7 @@ def display_data_management():
                 st.success("Item deleted successfully!")
                 # Refresh items list
                 items, _ = fetch_items()
-                st.session_state.items = items
+                st.session_state.items = items if isinstance(items, list) else []
         
         # Reset delete state
         del st.session_state.delete_id
@@ -305,12 +365,12 @@ def display_ai_assistant():
         
         # Show a spinner while waiting for AI response
         with st.spinner("AI is thinking..."):
-            ai_response = send_message_to_ai(user_input)
+            response = send_message_to_ai(user_input)
             
             # Add AI response to history
             st.session_state.chat_history.append({
                 "is_user": False,
-                "content": ai_response
+                "content": response["message"]
             })
         
         # Rerun to update the UI
@@ -334,14 +394,22 @@ def main():
     # Initialize session state
     initialize_session_state()
     
-    # Fetch items on startup
-    if not st.session_state.items:
-        items, _ = fetch_items()
-        st.session_state.items = items
-    
-    # Sidebar for navigation
+    # 添加状态指示器，在侧边栏显示
     with st.sidebar:
         st.title("Navigation")
+        status_container = st.empty()
+        
+        # 显示当前API连接状态
+        api_status = check_api_connection()
+        
+        if api_status:
+            status_container.success("✅ API Connected")
+        else:
+            status_container.error("❌ API Connection Failed")
+            st.error(f"Cannot connect to API at {API_BASE_URL}")
+            st.info("Make sure your backend server is running.")
+            st.code("docker-compose up -d")
+            
         page = st.radio(
             "Go to",
             ["Dashboard", "Data Management", "AI Assistant"],
@@ -353,9 +421,28 @@ def main():
         # Refresh data button
         if st.button("Refresh Data"):
             with st.spinner("Refreshing data..."):
-                items, _ = fetch_items()
-                st.session_state.items = items
+                items, _ = asyncio.run(fetch_items())
+                st.session_state.items = items if isinstance(items, list) else []
             st.success("Data refreshed!")
+    
+    # Fetch items on startup using asyncio.run
+    import asyncio
+    import sys
+    from pathlib import Path
+
+    # Add frontend directory to Python path
+    frontend_dir = str(Path(__file__).parent.resolve())
+    if frontend_dir not in sys.path:
+        sys.path.append(frontend_dir)
+
+    if not st.session_state.items:
+        try:
+            with st.spinner("Loading initial data..."):
+                items, _ = asyncio.run(fetch_items())
+                st.session_state.items = items if isinstance(items, list) else []
+        except Exception as e:
+            st.error(f"Failed to fetch initial items: {e}")
+            st.session_state.items = [] # Ensure it's an empty list on error
     
     # Display the selected page
     if page == "Dashboard":
@@ -364,6 +451,37 @@ def main():
         display_data_management()
     elif page == "AI Assistant":
         display_ai_assistant()
+
+
+def check_api_connection():
+    """检查API连接状态"""
+    import asyncio
+    
+    async def _check_connection():
+        try:
+            async with httpx.AsyncClient() as client:
+                # 使用API_BASE_URL的基础路径部分 + "/"
+                base_url = API_BASE_URL.rstrip("/api/v1")
+                if not base_url:
+                    base_url = "http://localhost:8000"
+                
+                # 首先尝试API根路径
+                response = await client.get(f"{API_BASE_URL}/", timeout=2.0)
+                if response.status_code == 200:
+                    return True
+                    
+                # 如果失败，尝试服务器根路径
+                response = await client.get(f"{base_url}/", timeout=2.0)
+                return response.status_code == 200
+        except Exception as e:
+            print(f"API连接错误: {str(e)}")
+            return False
+    
+    try:
+        return asyncio.run(_check_connection())
+    except Exception as e:
+        print(f"运行API检查时出错: {str(e)}")
+        return False
 
 
 if __name__ == "__main__":

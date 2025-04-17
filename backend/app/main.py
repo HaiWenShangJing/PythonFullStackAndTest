@@ -1,11 +1,22 @@
 import logging
+import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 
+from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.app.db import create_db_and_tables, get_engine
 from backend.app.routers import ai, items
+
+# 获取项目根目录
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
+ENV_FILE = BASE_DIR / ".env"
+
+# 使用绝对路径加载.env文件
+print(f"Loading .env from: {ENV_FILE}")
+load_dotenv(dotenv_path=ENV_FILE)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -49,6 +60,12 @@ app.include_router(ai.router, prefix="/api/v1", tags=["ai"])
 @app.get("/")
 async def root():
     return {"message": "Welcome to the Full-Stack AI CRUD API"}
+
+
+@app.get("/api/v1/")
+async def api_root():
+    """API根路径，用于健康检查"""
+    return {"status": "ok", "message": "API is running"}
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 from typing import List, Optional, Type, TypeVar
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.models import Base, Item
@@ -30,7 +30,7 @@ class CRUDBase:
     
     async def count(self, db: AsyncSession) -> int:
         """Count total records"""
-        result = await db.execute(select(self.model.id).count())
+        result = await db.execute(select(func.count(self.model.id)))
         return result.scalar()
     
     async def create(self, db: AsyncSession, *, obj_in) -> ModelType:
