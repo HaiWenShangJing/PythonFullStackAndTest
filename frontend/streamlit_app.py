@@ -114,7 +114,7 @@ async def send_message_to_ai(message: str) -> dict:
     async with httpx.AsyncClient() as client:
         try:
             response = await client.post(
-                f"{API_BASE_URL}/ai/chat",
+                f"{API_BASE_URL}/chat",
                 json={
                     "message": message,
                     "session_id": st.session_state.session_id,
@@ -341,7 +341,7 @@ def display_ai_assistant():
     
     with chat_container:
         for message in st.session_state.chat_history:
-            if message["is_user"]:
+            if message.get("is_user", False):
                 st.write(f"🧑 **You:** {message['content']}")
             else:
                 st.write(f"🤖 **AI:** {message['content']}")
@@ -365,8 +365,13 @@ def display_ai_assistant():
         
         # Show a spinner while waiting for AI response
         with st.spinner("AI is thinking..."):
-            response = send_message_to_ai(user_input)
-            
+            import asyncio
+            try:
+                response = asyncio.run(send_message_to_ai(user_input))
+            except RuntimeError:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                response = loop.run_until_complete(send_message_to_ai(user_input))
             # Add AI response to history
             st.session_state.chat_history.append({
                 "is_user": False,

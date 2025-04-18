@@ -9,11 +9,15 @@ services:
       - "8501:8501"  # Streamlit
     depends_on:
       - db
+    env_file:
+      - .env
     environment:
-      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/ai_crud
-      - OPENROUTER_API_KEY=testkey
-      - API_BASE_URL=http://localhost:8000/api/v1
-      - ENVIRONMENT=development
+      - DATABASE_URL
+      - OPENROUTER_API_KEY
+      - MODEL_NAME
+      - OPENROUTER_API_URL
+      - API_BASE_URL
+      - ENVIRONMENT
     volumes:
       - ./backend:/app/backend
       - ./frontend:/app/frontend

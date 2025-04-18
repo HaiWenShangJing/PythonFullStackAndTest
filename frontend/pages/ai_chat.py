@@ -84,24 +84,44 @@ def chat_input():
             context = [
                 {"role": msg["role"], "content": msg["content"]}
                 for msg in st.session_state.chat_history
-                if msg["role"] in ["user", "assistant"]
+                if msg.get("role") in ["user", "assistant"]
             ]
             
             # Send message to API
             with st.spinner("AI思考中..."):
-                response = asyncio.run(
-                    send_message_to_ai(user_input)
-                )
-                
-                if response:
-                    st.session_state.chat_history.append(
-                        {"role": "assistant", "content": response}
+                try:
+                    response = asyncio.run(
+                        send_message_to_ai(user_input)
                     )
                     
-                    # Update session ID
-                    st.session_state.session_id = str(response["session_id"])
-                    
-                    # Force a rerun to display the new message
+                    if response:
+                        # Check if it's an error response
+                        if 'message' in response and response['message'].startswith('Error:'):
+                            error_message = response['message']
+                            # Format and display error message
+                            st.error(f"API错误: {error_message}")
+                            # Add a system message about the error
+                            st.session_state.chat_history.append(
+                                {"role": "assistant", "content": f"抱歉，我遇到了一个技术问题，无法回应。请稍后再试。"}
+                            )
+                        else:
+                            # Normal response
+                            st.session_state.chat_history.append(
+                                {"role": "assistant", "content": response['message']}
+                            )
+                        
+                        # Update session ID
+                        if 'session_id' in response:
+                            st.session_state.session_id = str(response["session_id"])
+                        
+                        # Force a rerun to display the new message
+                        st.rerun()
+                except Exception as e:
+                    st.error(f"发生错误: {str(e)}")
+                    # Add a system message about the error
+                    st.session_state.chat_history.append(
+                        {"role": "assistant", "content": f"抱歉，发生了错误: {str(e)}"}
+                    )
                     st.rerun()
 
 
