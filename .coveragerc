@@ -1,0 +1,26 @@
+\
+[run]
+source = backend/app, frontend
+
+[report]
+exclude_lines =
+    pragma: no cover
+    def __repr__
+    if self.debug:
+    raise NotImplementedError
+    if __name__ == .__main__.:
+    pass
+    raise ImportError
+    except ImportError:
+    raise AssertionError
+
+omit =
+    */__init__.py
+    */tests/*
+    */venv/*
+    */env/*
+    */migrations/*
+    */alembic/*
+
+[html]
+directory = tests/coverage_html_report 
