@@ -1,19 +1,37 @@
 services:
-  # 测试数据库
-  test-db:
-    image: postgres:latest
-    environment:
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
-      - POSTGRES_DB=ai_crud_test
+  # Selenium Grid for UI testing
+  selenium-hub:
+    image: selenium/hub:4.10.0
     ports:
-      - "5433:5432"
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
+      - "4444:4444"
 
+  chrome-node:
+    image: selenium/node-chrome:4.10.0
+    depends_on:
+      - selenium-hub
+    environment:
+      - SE_EVENT_BUS_HOST=selenium-hub
+      - SE_EVENT_BUS_PUBLISH_PORT=4442
+      - SE_EVENT_BUS_SUBSCRIBE_PORT=4443
+      - SE_NODE_MAX_SESSIONS=2
+      - SE_NODE_OVERRIDE_MAX_SESSIONS=true
+    volumes:
+      - /dev/shm:/dev/shm
+
+  firefox-node:
+    image: selenium/node-firefox:4.10.0
+    depends_on:
+      - selenium-hub
+    environment:
+      - SE_EVENT_BUS_HOST=selenium-hub
+      - SE_EVENT_BUS_PUBLISH_PORT=4442
+      - SE_EVENT_BUS_SUBSCRIBE_PORT=4443
+      - SE_NODE_MAX_SESSIONS=2
+      - SE_NODE_OVERRIDE_MAX_SESSIONS=true
+    volumes:
+      - /dev/shm:/dev/shm
+
+  # API测试服务
   api-test:
     build:
       context: ..
@@ -25,17 +43,17 @@ services:
       - ..:/app
     environment:
       - ENVIRONMENT=test
-      - DB_HOST=test-db
+      # 使用宿主机网络访问外部服务
+      - DB_HOST=host.docker.internal
       - DB_USER=postgres
       - DB_PASSWORD=postgres
       - DB_NAME=ai_crud_test
-      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@test-db:5432/ai_crud_test
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@host.docker.internal:5432/ai_crud_test
+    network_mode: "host"
     command: >
       bash -c "export PYTHONPATH=/app && pytest tests/api --disable-warnings -v --html=tests/report.html --self-contained-html --tb=long"
-    depends_on:
-      test-db:
-        condition: service_healthy
 
+  # UI测试服务
   ui-test:
     build:
       context: ..
@@ -47,12 +65,22 @@ services:
       - ..:/app
     environment:
       - ENVIRONMENT=test
-      - DB_HOST=test-db
+      # 使用宿主机网络访问外部服务
+      - DB_HOST=host.docker.internal
       - DB_USER=postgres
       - DB_PASSWORD=postgres
       - DB_NAME=ai_crud_test
-      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@test-db:5432/ai_crud_test
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@host.docker.internal:5432/ai_crud_test
+      - SELENIUM_HUB_URL=http://selenium-hub:4444/wd/hub
+      # 使用宿主机本地端口访问已启动的Streamlit
+      - STREAMLIT_URL=http://host.docker.internal:8501
+      # 增加超时设置，防止新测试超时
+      - PAGE_LOAD_TIMEOUT=60
+      - AI_RESPONSE_TIMEOUT=60
+      - LONG_MSG_TIMEOUT=120
     command: >
       bash -c "pytest tests/ui --disable-warnings -v --html=tests/ui-report.html --self-contained-html --tb=long"
     depends_on:
-      - api-test
+      - selenium-hub
+      - chrome-node
+      - firefox-node
