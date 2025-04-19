@@ -4,6 +4,7 @@
 import os
 import sys
 from pathlib import Path
+import logging
 
 # 添加必要的路径以确保导入正常工作
 current_file = Path(__file__).resolve()
@@ -18,21 +19,46 @@ if str(project_root) not in sys.path:
 import asyncio
 import streamlit as st
 import httpx
+import json
 
 from frontend.utils.session import initialize_session_state
 from frontend.utils.api import API_BASE_URL
 
+# Get logger instance
+logger = logging.getLogger(__name__)
 
 async def fetch_items():
-    """从API获取项目"""
-    async with httpx.AsyncClient() as client:
-        response = await client.get(f"{API_BASE_URL}/items")
-        if response.status_code == 200:
+    """从API获取项目. Returns (list | None, error_message | None)"""
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(f"{API_BASE_URL}/items")
+            response.raise_for_status() # Raise HTTPError for bad responses (4xx or 5xx)
             data = response.json()
-            return data["items"], data["total"]
-        else:
-            st.error(f"获取项目错误: {response.text}")
-            return [], 0
+            items = data.get("items") # Safely get items
+            
+            # Validate that items is a list
+            if items is None or not isinstance(items, list):
+                logger.error(f"API response format error: 'items' key missing or not a list. Response: {data}")
+                return None, "API response format error: 'items' missing or not a list."
+                
+            # Return (data, None) on success
+            return items, None 
+    except httpx.HTTPStatusError as e:
+        error_msg = f"API Error ({e.response.status_code}): {e.response.text[:200]}" # Limit error text length
+        logger.error(f"fetch_items failed: {error_msg}", exc_info=True)
+        return None, error_msg # Return (None, error_message)
+    except httpx.RequestError as e:
+        error_msg = f"Request Error: Failed to connect to API at {API_BASE_URL}. Details: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        return None, error_msg # Return (None, error_message)
+    except json.JSONDecodeError as e:
+        error_msg = f"JSON Decode Error: Invalid response from API. Details: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        return None, error_msg # Return (None, error_message)
+    except Exception as e:
+        error_msg = f"Unexpected error fetching items: {type(e).__name__}: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        return None, error_msg # Return (None, error_message)
 
 
 async def create_item(name, description=None):
@@ -97,12 +123,20 @@ def display_data_management():
     if refresh_needed:
          st.session_state.data_refresh_requested = False # Reset flag
          with st.spinner("加载项目列表中..."):
-            items_list, error = asyncio.run(fetch_items()) # Use temp var name
-            if error:
-                st.error(f"加载项目失败: {error}")
+            items_list, error_msg = asyncio.run(fetch_items())
+            
+            # Check if there was an error message
+            if error_msg:
+                st.error(f"加载项目失败: {error_msg}")
                 st.session_state.data_mgmt_items = [] 
+            elif items_list is not None: # Check if list is not None (means success)
+                 # Assign the fetched list on success
+                st.session_state.data_mgmt_items = items_list 
             else:
-                st.session_state.data_mgmt_items = items_list if isinstance(items_list, list) else []
+                 # Handle unexpected case where both are None (shouldn't happen with new fetch_items)
+                 st.error("加载项目时发生未知错误。")
+                 logger.error("fetch_items returned (None, None) unexpectedly.")
+                 st.session_state.data_mgmt_items = []
 
     # 添加新项目表单
     with st.expander("添加新项目", expanded=False):
@@ -125,9 +159,12 @@ def display_data_management():
             ))
             if result:
                 st.success("项目创建成功!")
-                # Refresh item list
-                items_list, _ = asyncio.run(fetch_items())
-                st.session_state.data_mgmt_items = items_list if isinstance(items_list, list) else []
+                # Refresh item list - use new fetch_items signature
+                refreshed_items, refresh_error = asyncio.run(fetch_items())
+                if refresh_error:
+                     st.warning(f"创建成功，但刷新列表失败: {refresh_error}")
+                elif refreshed_items is not None:
+                     st.session_state.data_mgmt_items = refreshed_items
         
         # Reset form state
         del st.session_state.form_submitted
@@ -221,9 +258,12 @@ def display_data_management():
             ))
             if result:
                 st.success("项目更新成功!")
-                # Refresh item list
-                items_list, _ = asyncio.run(fetch_items())
-                st.session_state.data_mgmt_items = items_list if isinstance(items_list, list) else []
+                # Refresh item list - use new fetch_items signature
+                refreshed_items, refresh_error = asyncio.run(fetch_items())
+                if refresh_error:
+                     st.warning(f"更新成功，但刷新列表失败: {refresh_error}")
+                elif refreshed_items is not None:
+                     st.session_state.data_mgmt_items = refreshed_items
         
         # Reset update state
         del st.session_state.update_submitted
@@ -234,9 +274,12 @@ def display_data_management():
             result = asyncio.run(delete_item(st.session_state.delete_id))
             if result:
                 st.success("项目删除成功!")
-                # Refresh item list
-                items_list, _ = asyncio.run(fetch_items())
-                st.session_state.data_mgmt_items = items_list if isinstance(items_list, list) else []
+                # Refresh item list - use new fetch_items signature
+                refreshed_items, refresh_error = asyncio.run(fetch_items())
+                if refresh_error:
+                     st.warning(f"删除成功，但刷新列表失败: {refresh_error}")
+                elif refreshed_items is not None:
+                     st.session_state.data_mgmt_items = refreshed_items
         
         # Reset delete state
         del st.session_state.delete_id

@@ -40,12 +40,6 @@ def ai_chat_page():
     """AI聊天助手页面 (using st.chat_input and st.chat_message)"""
     # Page config should ideally be in the main app file (streamlit_app.py)
     # But we keep it here for now if this page can be run standalone
-    st.set_page_config(
-        page_title="AI 助手",
-        page_icon="🤖",
-        layout="wide",
-        initial_sidebar_state="collapsed"
-    )
     
     # Apply custom CSS
     st.markdown(get_chat_css(), unsafe_allow_html=True)
