@@ -87,23 +87,23 @@ def display_data_management():
     # 初始化会话状态
     initialize_session_state()
     
-    # 修复items问题
-    temp_items = st.session_state.get("items")
-    if callable(temp_items) or not isinstance(temp_items, list):
-        temp_items = []
-        st.session_state["items"] = temp_items
+    # Use a more specific key: data_mgmt_items
+    if "data_mgmt_items" not in st.session_state or not isinstance(st.session_state.data_mgmt_items, list):
+        st.session_state.data_mgmt_items = [] # Initialize/reset as empty list
+
+    # Fetch items if the list is empty or refresh requested
+    refresh_needed = not st.session_state.data_mgmt_items or st.session_state.get("data_refresh_requested", False)
     
-    # 如果刚进入页面且没有数据，自动获取
-    if not temp_items and not hasattr(st.session_state, "data_loaded"):
-        with st.spinner("加载数据中..."):
-            try:
-                items, _ = asyncio.run(fetch_items())
-                st.session_state.items = items if isinstance(items, list) else []
-                st.session_state.data_loaded = True
-            except Exception as e:
-                st.error(f"加载数据失败: {e}")
-                st.session_state.items = []
-    
+    if refresh_needed:
+         st.session_state.data_refresh_requested = False # Reset flag
+         with st.spinner("加载项目列表中..."):
+            items_list, error = asyncio.run(fetch_items()) # Use temp var name
+            if error:
+                st.error(f"加载项目失败: {error}")
+                st.session_state.data_mgmt_items = [] 
+            else:
+                st.session_state.data_mgmt_items = items_list if isinstance(items_list, list) else []
+
     # 添加新项目表单
     with st.expander("添加新项目", expanded=False):
         with st.form("new_item_form"):
@@ -116,7 +116,7 @@ def display_data_management():
                 st.session_state.form_data = {"name": name, "description": description}
                 st.rerun()
     
-    # 处理表单提交 (重新运行后，避免streamlit表单问题)
+    # 处理表单提交 
     if hasattr(st.session_state, "form_submitted") and st.session_state.form_submitted:
         with st.spinner("创建项目中..."):
             result = asyncio.run(create_item(
@@ -125,69 +125,93 @@ def display_data_management():
             ))
             if result:
                 st.success("项目创建成功!")
-                # 刷新项目列表
-                items, _ = asyncio.run(fetch_items())
-                st.session_state.items = items if isinstance(items, list) else []
+                # Refresh item list
+                items_list, _ = asyncio.run(fetch_items())
+                st.session_state.data_mgmt_items = items_list if isinstance(items_list, list) else []
         
-        # 重置表单状态
+        # Reset form state
         del st.session_state.form_submitted
         del st.session_state.form_data
     
     # 显示项目表格
     st.subheader("项目列表")
     
-    # 获取最新的项目列表
-    temp_items = st.session_state.items
+    # Get items using the new key
+    temp_items = st.session_state.data_mgmt_items 
     
+    # --- Explicit Type Check --- 
+    if not isinstance(temp_items, list):
+        st.error(f"Internal Error: Expected temp_items to be a list, but got {type(temp_items)}. Resetting.")
+        logger.error(f"Data Mgmt Error: Expected list for temp_items, got {type(temp_items)}. Value: {temp_items}") # Log the problematic value
+        temp_items = []
+        st.session_state.data_mgmt_items = [] # Also reset state
+
     if not temp_items:
         st.info("没有找到项目。")
     else:
-        # 创建用于显示的数据框
+        # Create dataframe for display
         df_data = []
-        for item in temp_items:
-            df_data.append({
-                "ID": item["id"],
-                "名称": item["name"],
-                "描述": item["description"] or "",
-                "创建时间": item["created_at"].split("T")[0],  # 只显示日期部分
-            })
+        for item in temp_items: # Iterate (should be safe now)
+            # Ensure item is a dict before accessing keys
+            if isinstance(item, dict):
+                 df_data.append({
+                     "ID": item.get("id", "N/A"),
+                     "名称": item.get("name", "N/A"),
+                     "描述": item.get("description") or "",
+                     # Use .get() for created_at and handle potential absence/format issues
+                     "创建时间": item.get("created_at", "").split("T")[0] if isinstance(item.get("created_at"), str) else "", 
+                 })
+            else:
+                 st.warning(f"Skipping invalid item in list: {item}") # Log invalid item
+                 logger.warning(f"Data Mgmt Warning: Skipped invalid item type {type(item)} in list: {item}")
         
-        # 显示为数据框
+        # Display dataframe
         st.dataframe(df_data, use_container_width=True)
         
-        # 项目操作
+        # Item operations
         st.subheader("项目操作")
         
-        # 选择一个项目
-        item_names = [f"{item['name']} ({item['id'][:8]}...)" for item in temp_items]
-        selected_item_idx = st.selectbox("选择一个项目", range(len(item_names)), format_func=lambda i: item_names[i])
-        selected_item = temp_items[selected_item_idx]
-        
-        # 操作选项卡
-        tab1, tab2 = st.tabs(["编辑", "删除"])
-        
-        with tab1:
-            with st.form("edit_item_form"):
-                edit_name = st.text_input("名称", value=selected_item["name"])
-                edit_description = st.text_area("描述", value=selected_item["description"] or "")
-                update_button = st.form_submit_button("更新项目")
-                
-                if update_button:
-                    st.session_state.update_submitted = True
-                    st.session_state.update_data = {
-                        "id": selected_item["id"],
-                        "name": edit_name,
-                        "description": edit_description
-                    }
-                    st.rerun()
-        
-        with tab2:
-            st.write("确定要删除这个项目吗?")
-            if st.button(f"删除 {selected_item['name']}", type="primary"):
-                st.session_state.delete_id = selected_item["id"]
-                st.rerun()
-    
-    # 处理更新提交
+        # Select item (check if temp_items is still valid after potential reset)
+        if temp_items: # Add check here
+             item_names = [f"{item.get('name', 'Invalid Item')} ({item.get('id', 'N/A')[:8]}...)" for item in temp_items if isinstance(item, dict)]
+             if not item_names:
+                 st.warning("No valid items available for selection.")
+             else:
+                 # Filter temp_items to only include valid dicts for indexing
+                 valid_items = [item for item in temp_items if isinstance(item, dict)]
+                 selected_item_idx = st.selectbox("选择一个项目", range(len(item_names)), format_func=lambda i: item_names[i])
+                 # Ensure index is valid before accessing
+                 if selected_item_idx < len(valid_items):
+                     selected_item = valid_items[selected_item_idx]
+                     # 操作选项卡
+                     tab1, tab2 = st.tabs(["编辑", "删除"])
+                     
+                     with tab1:
+                         with st.form("edit_item_form"):
+                             edit_name = st.text_input("名称", value=selected_item["name"])
+                             edit_description = st.text_area("描述", value=selected_item["description"] or "")
+                             update_button = st.form_submit_button("更新项目")
+                             
+                             if update_button:
+                                 st.session_state.update_submitted = True
+                                 st.session_state.update_data = {
+                                     "id": selected_item["id"],
+                                     "name": edit_name,
+                                     "description": edit_description
+                                 }
+                                 st.rerun()
+                     
+                     with tab2:
+                         st.write("确定要删除这个项目吗?")
+                         if st.button(f"删除 {selected_item['name']}", type="primary"):
+                             st.session_state.delete_id = selected_item["id"]
+                             st.rerun()
+                 else:
+                      st.error("Selected item index out of bounds after filtering.")
+        else:
+             st.info("No items available to perform operations.")
+
+    # --- Handle update/delete submissions (use new session state key) --- 
     if hasattr(st.session_state, "update_submitted") and st.session_state.update_submitted:
         with st.spinner("更新项目中..."):
             result = asyncio.run(update_item(
@@ -197,28 +221,31 @@ def display_data_management():
             ))
             if result:
                 st.success("项目更新成功!")
-                # 刷新项目列表
-                items, _ = asyncio.run(fetch_items())
-                st.session_state.items = items if isinstance(items, list) else []
+                # Refresh item list
+                items_list, _ = asyncio.run(fetch_items())
+                st.session_state.data_mgmt_items = items_list if isinstance(items_list, list) else []
         
-        # 重置更新状态
+        # Reset update state
         del st.session_state.update_submitted
         del st.session_state.update_data
     
-    # 处理删除提交
     if hasattr(st.session_state, "delete_id"):
         with st.spinner("删除项目中..."):
             result = asyncio.run(delete_item(st.session_state.delete_id))
             if result:
                 st.success("项目删除成功!")
-                # 刷新项目列表
-                items, _ = asyncio.run(fetch_items())
-                st.session_state.items = items if isinstance(items, list) else []
+                # Refresh item list
+                items_list, _ = asyncio.run(fetch_items())
+                st.session_state.data_mgmt_items = items_list if isinstance(items_list, list) else []
         
-        # 重置删除状态
+        # Reset delete state
         del st.session_state.delete_id
 
 
 # 运行页面
 if __name__ == "__main__":
+    # Need logger setup if run standalone
+    # import logging
+    # logger = logging.getLogger(__name__)
+    # ... (add handler etc.)
     display_data_management()

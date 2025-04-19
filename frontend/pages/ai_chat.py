@@ -65,43 +65,60 @@ def ai_chat_page():
     # --- Main Chat Area --- 
     st.markdown("## AI 助手") # Title for the main area
 
-    # Display existing chat messages using the updated renderer
-    # This now uses st.chat_message internally
+    # --- Input Handling --- 
+    # Use Streamlit's built-in chat input
+    prompt = st.chat_input("有什么我可以帮你的？", key="chat_input_main")
+
+    if prompt:
+        # 1. Add user message immediately to history
+        st.session_state.chat_history.append({"role": "user", "content": prompt})
+        # 2. Store the prompt to be processed in the next rerun
+        st.session_state.prompt_to_process = prompt
+        # 3. Trigger the next rerun. This will display the user message 
+        #    and then process the prompt in the logic below.
+        st.rerun()
+
+    # --- Display History --- 
+    # This runs *after* the input handling logic in each rerun.
+    # In the rerun triggered by st.rerun() above, it will show the user message.
     render_chat_history(st.session_state.chat_history)
     
-    # Placeholder for streaming AI response
-    # This needs to be defined *before* the input, but updated *after* the input is processed
+    # --- AI Response Placeholder --- 
+    # Define placeholder for potential streaming output
+    # It's placed *after* history rendering
     streaming_placeholder = st.empty()
 
-    # --- Chat Input --- 
-    # Use the function that wraps st.chat_input
-    prompt, send_triggered = fixed_bottom_input_container() 
-
-    # --- Process Input and Call API --- 
-    if send_triggered and prompt: 
-        current_input = prompt # Input from st.chat_input
-
-        # Add user message to history
-        st.session_state.chat_history.append({"role": "user", "content": current_input})
+    # --- Process Pending Input & Call API --- 
+    # Check if there's a prompt stored from the previous rerun
+    if prompt_to_process := st.session_state.get("prompt_to_process"):
+        # Clear the flag/stored prompt now that we are processing it
+        st.session_state.prompt_to_process = None 
         
-        # Immediately display the user message by re-rendering history
-        # (st.chat_input causes a rerun, so this should happen automatically)
-        # We might still need a rerun if the user message doesn't show up instantly.
-        # st.rerun() # Temporarily commented out, let st.chat_input handle rerun
+        current_input = prompt_to_process # Use the stored prompt
 
         # Prepare for AI response
         context = format_chat_context()
-        message_index = len(st.session_state.chat_history) # Index for the upcoming AI message
-        st.session_state.chat_history.append({"role": "assistant", "content": ""}) # Add empty AI message
-
-        # Set streaming flag
+        # Add empty AI message placeholder in history *before* calling API
+        st.session_state.chat_history.append({"role": "assistant", "content": ""})
+        message_index = len(st.session_state.chat_history) - 1 
+        
+        # Set streaming flag (optional, but can be useful)
         st.session_state.streaming = True
 
         # Callback function to update the *separate* placeholder
         def update_placeholder(content):
-            streaming_placeholder.markdown(content + "▌")
-            # Update the actual content in history silently
-            st.session_state.chat_history[message_index]["content"] = content
+            try:
+                # Update the placeholder element's display
+                streaming_placeholder.markdown(content + "▌")
+                # Update the actual content in history silently
+                # Check index validity before updating state
+                if message_index < len(st.session_state.chat_history):
+                    st.session_state.chat_history[message_index]["content"] = content
+                else:
+                    print(f"Error in callback: message_index {message_index} out of bounds.")
+            except Exception as e:
+                 # Log potential errors during placeholder update
+                 print(f"Error updating placeholder: {e}")
 
         # Call the streaming API
         full_response = run_async(
@@ -114,19 +131,24 @@ def ai_chat_page():
         )
         
         # Streaming finished
-        st.session_state.streaming = False
+        st.session_state.streaming = False # Unset flag
         
         # Update the final message in history and clear the placeholder
-        if full_response:
-            st.session_state.chat_history[message_index]["content"] = full_response
-            streaming_placeholder.empty() # Clear the external placeholder
+        if message_index < len(st.session_state.chat_history):
+            if full_response:
+                st.session_state.chat_history[message_index]["content"] = full_response
+            else:
+                 # Handle potential errors if run_async returned None or empty
+                 error_content = "抱歉，AI回复时出现错误或无内容返回。"
+                 st.session_state.chat_history[message_index]["content"] = error_content
+                 print(f"API call for '{current_input}' returned empty/None response.") # Log details
         else:
-             # Handle potential errors if needed, e.g., display error in chat
-             error_content = "抱歉，AI回复时出现错误。"
-             st.session_state.chat_history[message_index]["content"] = error_content
-             streaming_placeholder.empty()
+             # Log error if index is still invalid after streaming
+             print(f"Error after stream: message_index {message_index} out of bounds.")
 
-        # Rerun to display the final AI message rendered by render_chat_history
+        streaming_placeholder.empty() # Clear the external placeholder
+
+        # Rerun one last time to display the final AI message rendered by render_chat_history
         st.rerun()
 
 

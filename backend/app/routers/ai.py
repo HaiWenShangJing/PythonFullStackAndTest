@@ -602,19 +602,22 @@ async def chat_stream(request: ChatRequest):
                                             # Parse the JSON data
                                             parsed_data = json.loads(data)
                                             
-                                            # Extract the content delta if available
-                                            if (
-                                                "choices" in parsed_data 
-                                                and parsed_data["choices"] 
-                                                and "delta" in parsed_data["choices"][0]
-                                                and "content" in parsed_data["choices"][0]["delta"]
-                                            ):
-                                                content = parsed_data["choices"][0]["delta"]["content"]
-                                                if content:
+                                            # More robust content extraction
+                                            choices = parsed_data.get("choices", [])
+                                            if choices:
+                                                delta = choices[0].get("delta", {})
+                                                content = delta.get("content") # Use .get(), allows None
+                                                
+                                                # Yield content if it's not None 
+                                                # (We allow empty strings "" but skip None)
+                                                if content is not None:
                                                     # Stream the content
                                                     yield content
                                         except json.JSONDecodeError:
-                                            # Skip invalid JSON
+                                            logger.warning(f"Skipping invalid JSON in stream: {data}")
+                                            continue
+                                        except Exception as parse_err:
+                                            logger.error(f"Error parsing stream data: {parse_err} - Data: {data}")
                                             continue
                                 
                                 # Exit the URL loop if successful
