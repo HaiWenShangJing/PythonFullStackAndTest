@@ -1,0 +1,12 @@
+FROM python:latest
+
+WORKDIR /app
+
+# 复制测试依赖文件
+COPY tests/requirements-test.txt /app/tests/requirements-test.txt
+
+# 安装测试依赖
+RUN pip install -r /app/tests/requirements-test.txt
+
+# 设置Python路径
+ENV PYTHONPATH=/app 

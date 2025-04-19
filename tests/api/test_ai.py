@@ -10,7 +10,7 @@ from httpx import AsyncClient, HTTPStatusError, Response
 @pytest.mark.asyncio
 @patch("backend.app.routers.ai.httpx.AsyncClient.post")
 async def test_chat_with_ai(mock_post, client: AsyncClient):
-    """Test the AI chat endpoint with mocked AI service"""
+    """Test the AI chat endpoint with mocked AI service - 成功用例1"""
     # Setup mock response
     mock_response = AsyncMock()
     mock_response.status_code = 200
@@ -61,9 +61,93 @@ async def test_chat_with_ai(mock_post, client: AsyncClient):
 @pytest.mark.api
 @pytest.mark.asyncio
 @patch("backend.app.routers.ai.httpx.AsyncClient.post")
+async def test_chat_with_ai_different_model(mock_post, client: AsyncClient):
+    """Test the AI chat endpoint with a specific model - 成功用例2"""
+    # Setup mock response
+    mock_response = AsyncMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {
+        "choices": [
+            {
+                "message": {
+                    "content": "Response from specific model"
+                }
+            }
+        ]
+    }
+    mock_post.return_value = mock_response
+    
+    # Test data with a specific model
+    chat_request = {
+        "message": "Hello AI with specific model",
+        "session_id": str(uuid.uuid4()),
+        "model": "anthropic/claude-3-haiku"
+    }
+    
+    # Make API request
+    response = await client.post("/api/v1/chat", json=chat_request)
+    
+    # Validate response
+    assert response.status_code == 200
+    data = response.json()
+    assert "message" in data
+    assert data["message"] == "Response from specific model"
+    
+    # 验证mock被调用并且使用了正确的模型
+    mock_post.assert_called_once()
+    assert "model" in mock_post.call_args[1]["json"]
+    assert mock_post.call_args[1]["json"]["model"] == "anthropic/claude-3-haiku"
+
+
+@pytest.mark.api
+@pytest.mark.asyncio
+@patch("backend.app.routers.ai.httpx.AsyncClient.post")
+async def test_chat_with_empty_context(mock_post, client: AsyncClient):
+    """Test the AI chat endpoint with empty context - 成功用例3"""
+    # Setup mock response
+    mock_response = AsyncMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {
+        "choices": [
+            {
+                "message": {
+                    "content": "Response to new conversation"
+                }
+            }
+        ]
+    }
+    mock_post.return_value = mock_response
+    
+    # Test data with empty context
+    chat_request = {
+        "message": "Start a new conversation",
+        "session_id": str(uuid.uuid4())
+    }
+    
+    # Make API request
+    response = await client.post("/api/v1/chat", json=chat_request)
+    
+    # Validate response
+    assert response.status_code == 200
+    data = response.json()
+    assert "message" in data
+    assert data["message"] == "Response to new conversation"
+    
+    # 验证消息只包含系统提示和用户消息
+    mock_post.assert_called_once()
+    sent_messages = mock_post.call_args[1]["json"]["messages"]
+    assert len(sent_messages) >= 1  # 至少有用户消息
+    # 最后的消息应该是用户消息
+    assert sent_messages[-1]["role"] == "user"
+    assert sent_messages[-1]["content"] == "Start a new conversation"
+
+
+@pytest.mark.api
+@pytest.mark.asyncio
+@patch("backend.app.routers.ai.httpx.AsyncClient.post")
 async def test_chat_with_ai_http_error(mock_post, client: AsyncClient):
-    """Test error handling in the AI chat endpoint"""
-    # Setup mock to raise HTTPStatusError
+    """Test error handling in the AI chat endpoint - 失败用例1"""
+    # Setup mock to raise Exception
     mock_post.side_effect = Exception("API Error")
     
     # Test data
@@ -89,11 +173,45 @@ async def test_chat_with_ai_http_error(mock_post, client: AsyncClient):
 @pytest.mark.api
 @pytest.mark.asyncio
 @patch("backend.app.routers.ai.httpx.AsyncClient.post")
+async def test_chat_with_ai_invalid_response(mock_post, client: AsyncClient):
+    """Test handling of invalid API response - 失败用例2"""
+    # Setup mock response with invalid format
+    mock_response = AsyncMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {
+        "invalid_format": True,
+        "no_choices_field": "Missing choices field"
+    }
+    mock_post.return_value = mock_response
+    
+    # Test data
+    chat_request = {
+        "message": "Hello AI",
+        "session_id": str(uuid.uuid4())
+    }
+    
+    # Make API request
+    response = await client.post("/api/v1/chat", json=chat_request)
+    
+    # Expect fallback response due to invalid format
+    assert response.status_code == 200
+    data = response.json()
+    assert "message" in data
+    assert "session_id" in data
+    # 应该有错误消息中的一部分
+    error_msg = os.environ.get("AI_SERVICE_ERROR_MSG", "AI服务暂时无法使用")
+    assert error_msg in data["message"]
+
+
+@pytest.mark.api
+@pytest.mark.asyncio
+@patch("backend.app.routers.ai.httpx.AsyncClient.post")
 async def test_chat_with_ai_credits_error(mock_post, client: AsyncClient):
-    """Test handling of 402 payment required error (credits error)"""
+    """Test handling of 402 payment required error (credits error) - 失败用例3"""
     # 创建模拟响应对象，返回402错误
     mock_response = AsyncMock()
     mock_response.status_code = 402
+    mock_response.raise_for_status = AsyncMock(side_effect=HTTPStatusError("Payment required", request=None, response=mock_response))
     mock_response.json.return_value = {
         "error": {
             "code": 402,

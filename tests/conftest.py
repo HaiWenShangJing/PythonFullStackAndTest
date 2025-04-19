@@ -13,10 +13,20 @@ from backend.app.db import get_session
 from backend.app.main import app
 from backend.app.models import Base
 
-# Test database URL - use in-memory SQLite for testing
+# 从环境变量获取测试数据库配置
+DB_USER = os.environ.get("DB_USER", "postgres")
+DB_PASSWORD = os.environ.get("DB_PASSWORD", "postgres")
+DB_HOST = os.environ.get("DB_HOST", "db")  # 在Docker环境中使用服务名称
+DB_PORT = os.environ.get("DB_PORT", "5432")
+DB_NAME = os.environ.get("DB_NAME", "ai_crud_test")
+
+# 构建测试数据库URL
 TEST_DATABASE_URL = os.environ.get(
-    "DATABASE_URL", "postgresql+asyncpg://postgres:postgres@localhost:5432/ai_crud_test"
+    "DATABASE_URL", 
+    f"postgresql+asyncpg://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 )
+
+print(f"Using test database: {TEST_DATABASE_URL}")
 
 # Create test engine
 test_engine = create_async_engine(
@@ -61,12 +71,14 @@ def event_loop() -> Generator:
 @pytest_asyncio.fixture(scope="session")
 async def setup_database():
     """Set up the test database"""
+    print("Setting up test database...")
     async with test_engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
     
     yield
     
+    print("Tearing down test database...")
     async with test_engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
 

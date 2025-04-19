@@ -1,0 +1,619 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8"/>
+    <title>report.html</title>
+    <style>body {
+  font-family: Helvetica, Arial, sans-serif;
+  font-size: 12px;
+  /* do not increase min-width as some may use split screens */
+  min-width: 800px;
+  color: #999;
+}
+
+h1 {
+  font-size: 24px;
+  color: black;
+}
+
+h2 {
+  font-size: 16px;
+  color: black;
+}
+
+p {
+  color: black;
+}
+
+a {
+  color: #999;
+}
+
+table {
+  border-collapse: collapse;
+}
+
+/******************************
+ * SUMMARY INFORMATION
+ ******************************/
+#environment td {
+  padding: 5px;
+  border: 1px solid #E6E6E6;
+}
+#environment tr:nth-child(odd) {
+  background-color: #f6f6f6;
+}
+
+/******************************
+ * TEST RESULT COLORS
+ ******************************/
+span.passed,
+.passed .col-result {
+  color: green;
+}
+
+span.skipped,
+span.xfailed,
+span.rerun,
+.skipped .col-result,
+.xfailed .col-result,
+.rerun .col-result {
+  color: orange;
+}
+
+span.error,
+span.failed,
+span.xpassed,
+.error .col-result,
+.failed .col-result,
+.xpassed .col-result {
+  color: red;
+}
+
+/******************************
+ * RESULTS TABLE
+ *
+ * 1. Table Layout
+ * 2. Extra
+ * 3. Sorting items
+ *
+ ******************************/
+/*------------------
+ * 1. Table Layout
+ *------------------*/
+#results-table {
+  border: 1px solid #e6e6e6;
+  color: #999;
+  font-size: 12px;
+  width: 100%;
+}
+#results-table th,
+#results-table td {
+  padding: 5px;
+  border: 1px solid #E6E6E6;
+  text-align: left;
+}
+#results-table th {
+  font-weight: bold;
+}
+
+/*------------------
+ * 2. Extra
+ *------------------*/
+.log {
+  background-color: #e6e6e6;
+  border: 1px solid #e6e6e6;
+  color: black;
+  display: block;
+  font-family: "Courier New", Courier, monospace;
+  height: 230px;
+  overflow-y: scroll;
+  padding: 5px;
+  white-space: pre-wrap;
+}
+.log:only-child {
+  height: inherit;
+}
+
+div.image {
+  border: 1px solid #e6e6e6;
+  float: right;
+  height: 240px;
+  margin-left: 5px;
+  overflow: hidden;
+  width: 320px;
+}
+div.image img {
+  width: 320px;
+}
+
+div.video {
+  border: 1px solid #e6e6e6;
+  float: right;
+  height: 240px;
+  margin-left: 5px;
+  overflow: hidden;
+  width: 320px;
+}
+div.video video {
+  overflow: hidden;
+  width: 320px;
+  height: 240px;
+}
+
+.collapsed {
+  display: none;
+}
+
+.expander::after {
+  content: " (show details)";
+  color: #BBB;
+  font-style: italic;
+  cursor: pointer;
+}
+
+.collapser::after {
+  content: " (hide details)";
+  color: #BBB;
+  font-style: italic;
+  cursor: pointer;
+}
+
+/*------------------
+ * 3. Sorting items
+ *------------------*/
+.sortable {
+  cursor: pointer;
+}
+
+.sort-icon {
+  font-size: 0px;
+  float: left;
+  margin-right: 5px;
+  margin-top: 5px;
+  /*triangle*/
+  width: 0;
+  height: 0;
+  border-left: 8px solid transparent;
+  border-right: 8px solid transparent;
+}
+.inactive .sort-icon {
+  /*finish triangle*/
+  border-top: 8px solid #E6E6E6;
+}
+.asc.active .sort-icon {
+  /*finish triangle*/
+  border-bottom: 8px solid #999;
+}
+.desc.active .sort-icon {
+  /*finish triangle*/
+  border-top: 8px solid #999;
+}
+</style></head>
+  <body onLoad="init()">
+    <script>/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+
+function toArray(iter) {
+    if (iter === null) {
+        return null;
+    }
+    return Array.prototype.slice.call(iter);
+}
+
+function find(selector, elem) { // eslint-disable-line no-redeclare
+    if (!elem) {
+        elem = document;
+    }
+    return elem.querySelector(selector);
+}
+
+function findAll(selector, elem) {
+    if (!elem) {
+        elem = document;
+    }
+    return toArray(elem.querySelectorAll(selector));
+}
+
+function sortColumn(elem) {
+    toggleSortStates(elem);
+    const colIndex = toArray(elem.parentNode.childNodes).indexOf(elem);
+    let key;
+    if (elem.classList.contains('result')) {
+        key = keyResult;
+    } else if (elem.classList.contains('links')) {
+        key = keyLink;
+    } else {
+        key = keyAlpha;
+    }
+    sortTable(elem, key(colIndex));
+}
+
+function showAllExtras() { // eslint-disable-line no-unused-vars
+    findAll('.col-result').forEach(showExtras);
+}
+
+function hideAllExtras() { // eslint-disable-line no-unused-vars
+    findAll('.col-result').forEach(hideExtras);
+}
+
+function showExtras(colresultElem) {
+    const extras = colresultElem.parentNode.nextElementSibling;
+    const expandcollapse = colresultElem.firstElementChild;
+    extras.classList.remove('collapsed');
+    expandcollapse.classList.remove('expander');
+    expandcollapse.classList.add('collapser');
+}
+
+function hideExtras(colresultElem) {
+    const extras = colresultElem.parentNode.nextElementSibling;
+    const expandcollapse = colresultElem.firstElementChild;
+    extras.classList.add('collapsed');
+    expandcollapse.classList.remove('collapser');
+    expandcollapse.classList.add('expander');
+}
+
+function showFilters() {
+    let visibleString = getQueryParameter('visible') || 'all';
+    visibleString = visibleString.toLowerCase();
+    const checkedItems = visibleString.split(',');
+
+    const filterItems = document.getElementsByClassName('filter');
+    for (let i = 0; i < filterItems.length; i++) {
+        filterItems[i].hidden = false;
+
+        if (visibleString != 'all') {
+            filterItems[i].checked = checkedItems.includes(filterItems[i].getAttribute('data-test-result'));
+            filterTable(filterItems[i]);
+        }
+    }
+}
+
+function addCollapse() {
+    // Add links for show/hide all
+    const resulttable = find('table#results-table');
+    const showhideall = document.createElement('p');
+    showhideall.innerHTML = '<a href="javascript:showAllExtras()">Show all details</a> / ' +
+                            '<a href="javascript:hideAllExtras()">Hide all details</a>';
+    resulttable.parentElement.insertBefore(showhideall, resulttable);
+
+    // Add show/hide link to each result
+    findAll('.col-result').forEach(function(elem) {
+        const collapsed = getQueryParameter('collapsed') || 'Passed';
+        const extras = elem.parentNode.nextElementSibling;
+        const expandcollapse = document.createElement('span');
+        if (extras.classList.contains('collapsed')) {
+            expandcollapse.classList.add('expander');
+        } else if (collapsed.includes(elem.innerHTML)) {
+            extras.classList.add('collapsed');
+            expandcollapse.classList.add('expander');
+        } else {
+            expandcollapse.classList.add('collapser');
+        }
+        elem.appendChild(expandcollapse);
+
+        elem.addEventListener('click', function(event) {
+            if (event.currentTarget.parentNode.nextElementSibling.classList.contains('collapsed')) {
+                showExtras(event.currentTarget);
+            } else {
+                hideExtras(event.currentTarget);
+            }
+        });
+    });
+}
+
+function getQueryParameter(name) {
+    const match = RegExp('[?&]' + name + '=([^&]*)').exec(window.location.search);
+    return match && decodeURIComponent(match[1].replace(/\+/g, ' '));
+}
+
+function init () { // eslint-disable-line no-unused-vars
+    resetSortHeaders();
+
+    addCollapse();
+
+    showFilters();
+
+    sortColumn(find('.initial-sort'));
+
+    findAll('.sortable').forEach(function(elem) {
+        elem.addEventListener('click',
+            function() {
+                sortColumn(elem);
+            }, false);
+    });
+}
+
+function sortTable(clicked, keyFunc) {
+    const rows = findAll('.results-table-row');
+    const reversed = !clicked.classList.contains('asc');
+    const sortedRows = sort(rows, keyFunc, reversed);
+    /* Whole table is removed here because browsers acts much slower
+     * when appending existing elements.
+     */
+    const thead = document.getElementById('results-table-head');
+    document.getElementById('results-table').remove();
+    const parent = document.createElement('table');
+    parent.id = 'results-table';
+    parent.appendChild(thead);
+    sortedRows.forEach(function(elem) {
+        parent.appendChild(elem);
+    });
+    document.getElementsByTagName('BODY')[0].appendChild(parent);
+}
+
+function sort(items, keyFunc, reversed) {
+    const sortArray = items.map(function(item, i) {
+        return [keyFunc(item), i];
+    });
+
+    sortArray.sort(function(a, b) {
+        const keyA = a[0];
+        const keyB = b[0];
+
+        if (keyA == keyB) return 0;
+
+        if (reversed) {
+            return keyA < keyB ? 1 : -1;
+        } else {
+            return keyA > keyB ? 1 : -1;
+        }
+    });
+
+    return sortArray.map(function(item) {
+        const index = item[1];
+        return items[index];
+    });
+}
+
+function keyAlpha(colIndex) {
+    return function(elem) {
+        return elem.childNodes[1].childNodes[colIndex].firstChild.data.toLowerCase();
+    };
+}
+
+function keyLink(colIndex) {
+    return function(elem) {
+        const dataCell = elem.childNodes[1].childNodes[colIndex].firstChild;
+        return dataCell == null ? '' : dataCell.innerText.toLowerCase();
+    };
+}
+
+function keyResult(colIndex) {
+    return function(elem) {
+        const strings = ['Error', 'Failed', 'Rerun', 'XFailed', 'XPassed',
+            'Skipped', 'Passed'];
+        return strings.indexOf(elem.childNodes[1].childNodes[colIndex].firstChild.data);
+    };
+}
+
+function resetSortHeaders() {
+    findAll('.sort-icon').forEach(function(elem) {
+        elem.parentNode.removeChild(elem);
+    });
+    findAll('.sortable').forEach(function(elem) {
+        const icon = document.createElement('div');
+        icon.className = 'sort-icon';
+        icon.textContent = 'vvv';
+        elem.insertBefore(icon, elem.firstChild);
+        elem.classList.remove('desc', 'active');
+        elem.classList.add('asc', 'inactive');
+    });
+}
+
+function toggleSortStates(elem) {
+    //if active, toggle between asc and desc
+    if (elem.classList.contains('active')) {
+        elem.classList.toggle('asc');
+        elem.classList.toggle('desc');
+    }
+
+    //if inactive, reset all other functions and add ascending active
+    if (elem.classList.contains('inactive')) {
+        resetSortHeaders();
+        elem.classList.remove('inactive');
+        elem.classList.add('active');
+    }
+}
+
+function isAllRowsHidden(value) {
+    return value.hidden == false;
+}
+
+function filterTable(elem) { // eslint-disable-line no-unused-vars
+    const outcomeAtt = 'data-test-result';
+    const outcome = elem.getAttribute(outcomeAtt);
+    const classOutcome = outcome + ' results-table-row';
+    const outcomeRows = document.getElementsByClassName(classOutcome);
+
+    for(let i = 0; i < outcomeRows.length; i++){
+        outcomeRows[i].hidden = !elem.checked;
+    }
+
+    const rows = findAll('.results-table-row').filter(isAllRowsHidden);
+    const allRowsHidden = rows.length == 0 ? true : false;
+    const notFoundMessage = document.getElementById('not-found-message');
+    notFoundMessage.hidden = !allRowsHidden;
+}
+</script>
+    <h1>report.html</h1>
+    <p>Report generated on 19-Apr-2025 at 13:07:06 by <a href="https://pypi.python.org/pypi/pytest-html">pytest-html</a> v3.2.0</p>
+    <h2>Summary</h2>
+    <p>12 tests ran in 4.34 seconds. </p>
+    <p class="filter" hidden="true">(Un)check the boxes to filter the results.</p><input checked="true" class="filter" data-test-result="passed" hidden="true" name="filter_checkbox" onChange="filterTable(this)" type="checkbox"/><span class="passed">5 passed</span>, <input checked="true" class="filter" data-test-result="skipped" disabled="true" hidden="true" name="filter_checkbox" onChange="filterTable(this)" type="checkbox"/><span class="skipped">0 skipped</span>, <input checked="true" class="filter" data-test-result="failed" hidden="true" name="filter_checkbox" onChange="filterTable(this)" type="checkbox"/><span class="failed">7 failed</span>, <input checked="true" class="filter" data-test-result="error" disabled="true" hidden="true" name="filter_checkbox" onChange="filterTable(this)" type="checkbox"/><span class="error">0 errors</span>, <input checked="true" class="filter" data-test-result="xfailed" disabled="true" hidden="true" name="filter_checkbox" onChange="filterTable(this)" type="checkbox"/><span class="xfailed">0 expected failures</span>, <input checked="true" class="filter" data-test-result="xpassed" disabled="true" hidden="true" name="filter_checkbox" onChange="filterTable(this)" type="checkbox"/><span class="xpassed">0 unexpected passes</span>
+    <h2>Results</h2>
+    <table id="results-table">
+      <thead id="results-table-head">
+        <tr>
+          <th class="sortable result initial-sort" col="result">Result</th>
+          <th class="sortable" col="name">Test</th>
+          <th class="sortable" col="duration">Duration</th>
+          <th class="sortable links" col="links">Links</th></tr>
+        <tr hidden="true" id="not-found-message">
+          <th colspan="4">No results found. Try to check the filters</th></tr></thead>
+      <tbody class="failed results-table-row">
+        <tr>
+          <td class="col-result">Failed</td>
+          <td class="col-name">tests/api/test_ai.py::test_chat_with_ai</td>
+          <td class="col-duration">0.01</td>
+          <td class="col-links"></td></tr>
+        <tr class="collapsed">
+          <td class="extra" colspan="4">
+            <div class="log">mock_post = &lt;AsyncMock name=&#x27;post&#x27; id=&#x27;140212930726944&#x27;&gt;, client = &lt;httpx.AsyncClient object at 0x7f85ddedd2b0&gt;<br/><br/>    @pytest.mark.api<br/>    @pytest.mark.asyncio<br/>    @patch(&quot;backend.app.routers.ai.httpx.AsyncClient.post&quot;)<br/>    async def test_chat_with_ai(mock_post, client: AsyncClient):<br/>        &quot;&quot;&quot;Test the AI chat endpoint with mocked AI service - 成功用例1&quot;&quot;&quot;<br/>        # Setup mock response<br/>        mock_response = AsyncMock()<br/>        mock_response.status_code = 200<br/>        mock_response.json.return_value = {<br/>            &quot;choices&quot;: [<br/>                {<br/>                    &quot;message&quot;: {<br/>                        &quot;content&quot;: &quot;This is a test AI response&quot;<br/>                    }<br/>                }<br/>            ]<br/>        }<br/>        mock_post.return_value = mock_response<br/>    <br/>        # Test data<br/>        chat_request = {<br/>            &quot;message&quot;: &quot;Hello AI&quot;,<br/>            &quot;session_id&quot;: str(uuid.uuid4()),<br/>            &quot;context&quot;: [<br/>                {&quot;role&quot;: &quot;system&quot;, &quot;content&quot;: &quot;You are a helpful assistant.&quot;},<br/>                {&quot;role&quot;: &quot;user&quot;, &quot;content&quot;: &quot;Previous message&quot;},<br/>                {&quot;role&quot;: &quot;assistant&quot;, &quot;content&quot;: &quot;Previous response&quot;},<br/>            ]<br/>        }<br/>    <br/>        # Make API request<br/>        response = await client.post(&quot;/api/v1/chat&quot;, json=chat_request)<br/>    <br/>        # Validate response<br/>        assert response.status_code == 200<br/>        data = response.json()<br/>&gt;       assert &quot;message&quot; in data<br/><span class="error">E       TypeError: argument of type &#x27;coroutine&#x27; is not iterable</span><br/><br/>tests/api/test_ai.py:45: TypeError<br/></div></td></tr></tbody>
+      <tbody class="failed results-table-row">
+        <tr>
+          <td class="col-result">Failed</td>
+          <td class="col-name">tests/api/test_ai.py::test_chat_with_ai_different_model</td>
+          <td class="col-duration">0.00</td>
+          <td class="col-links"></td></tr>
+        <tr class="collapsed">
+          <td class="extra" colspan="4">
+            <div class="log">mock_post = &lt;AsyncMock name=&#x27;post&#x27; id=&#x27;140212930733328&#x27;&gt;, client = &lt;httpx.AsyncClient object at 0x7f85ddeae210&gt;<br/><br/>    @pytest.mark.api<br/>    @pytest.mark.asyncio<br/>    @patch(&quot;backend.app.routers.ai.httpx.AsyncClient.post&quot;)<br/>    async def test_chat_with_ai_different_model(mock_post, client: AsyncClient):<br/>        &quot;&quot;&quot;Test the AI chat endpoint with a specific model - 成功用例2&quot;&quot;&quot;<br/>        # Setup mock response<br/>        mock_response = AsyncMock()<br/>        mock_response.status_code = 200<br/>        mock_response.json.return_value = {<br/>            &quot;choices&quot;: [<br/>                {<br/>                    &quot;message&quot;: {<br/>                        &quot;content&quot;: &quot;Response from specific model&quot;<br/>                    }<br/>                }<br/>            ]<br/>        }<br/>        mock_post.return_value = mock_response<br/>    <br/>        # Test data with a specific model<br/>        chat_request = {<br/>            &quot;message&quot;: &quot;Hello AI with specific model&quot;,<br/>            &quot;session_id&quot;: str(uuid.uuid4()),<br/>            &quot;model&quot;: &quot;anthropic/claude-3-haiku&quot;<br/>        }<br/>    <br/>        # Make API request<br/>        response = await client.post(&quot;/api/v1/chat&quot;, json=chat_request)<br/>    <br/>        # Validate response<br/>        assert response.status_code == 200<br/>        data = response.json()<br/>&gt;       assert &quot;message&quot; in data<br/><span class="error">E       TypeError: argument of type &#x27;coroutine&#x27; is not iterable</span><br/><br/>tests/api/test_ai.py:93: TypeError<br/></div></td></tr></tbody>
+      <tbody class="failed results-table-row">
+        <tr>
+          <td class="col-result">Failed</td>
+          <td class="col-name">tests/api/test_ai.py::test_chat_with_empty_context</td>
+          <td class="col-duration">0.00</td>
+          <td class="col-links"></td></tr>
+        <tr class="collapsed">
+          <td class="extra" colspan="4">
+            <div class="log">mock_post = &lt;AsyncMock name=&#x27;post&#x27; id=&#x27;140212930737360&#x27;&gt;, client = &lt;httpx.AsyncClient object at 0x7f85ddeaee90&gt;<br/><br/>    @pytest.mark.api<br/>    @pytest.mark.asyncio<br/>    @patch(&quot;backend.app.routers.ai.httpx.AsyncClient.post&quot;)<br/>    async def test_chat_with_empty_context(mock_post, client: AsyncClient):<br/>        &quot;&quot;&quot;Test the AI chat endpoint with empty context - 成功用例3&quot;&quot;&quot;<br/>        # Setup mock response<br/>        mock_response = AsyncMock()<br/>        mock_response.status_code = 200<br/>        mock_response.json.return_value = {<br/>            &quot;choices&quot;: [<br/>                {<br/>                    &quot;message&quot;: {<br/>                        &quot;content&quot;: &quot;Response to new conversation&quot;<br/>                    }<br/>                }<br/>            ]<br/>        }<br/>        mock_post.return_value = mock_response<br/>    <br/>        # Test data with empty context<br/>        chat_request = {<br/>            &quot;message&quot;: &quot;Start a new conversation&quot;,<br/>            &quot;session_id&quot;: str(uuid.uuid4())<br/>        }<br/>    <br/>        # Make API request<br/>        response = await client.post(&quot;/api/v1/chat&quot;, json=chat_request)<br/>    <br/>        # Validate response<br/>        assert response.status_code == 200<br/>        data = response.json()<br/>&gt;       assert &quot;message&quot; in data<br/><span class="error">E       TypeError: argument of type &#x27;coroutine&#x27; is not iterable</span><br/><br/>tests/api/test_ai.py:133: TypeError<br/></div></td></tr></tbody>
+      <tbody class="failed results-table-row">
+        <tr>
+          <td class="col-result">Failed</td>
+          <td class="col-name">tests/api/test_ai.py::test_chat_with_ai_http_error</td>
+          <td class="col-duration">0.00</td>
+          <td class="col-links"></td></tr>
+        <tr class="collapsed">
+          <td class="extra" colspan="4">
+            <div class="log">mock_post = &lt;AsyncMock name=&#x27;post&#x27; id=&#x27;140212930739376&#x27;&gt;, client = &lt;httpx.AsyncClient object at 0x7f85ddc3c510&gt;<br/><br/>    @pytest.mark.api<br/>    @pytest.mark.asyncio<br/>    @patch(&quot;backend.app.routers.ai.httpx.AsyncClient.post&quot;)<br/>    async def test_chat_with_ai_http_error(mock_post, client: AsyncClient):<br/>        &quot;&quot;&quot;Test error handling in the AI chat endpoint - 失败用例1&quot;&quot;&quot;<br/>        # Setup mock to raise Exception<br/>        mock_post.side_effect = Exception(&quot;API Error&quot;)<br/>    <br/>        # Test data<br/>        chat_request = {<br/>            &quot;message&quot;: &quot;Hello AI&quot;,<br/>        }<br/>    <br/>        # Make API request<br/>&gt;       response = await client.post(&quot;/api/v1/chat&quot;, json=chat_request)<br/><br/>tests/api/test_ai.py:159: <br/>_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ <br/><br/>self = &lt;AsyncMock name=&#x27;post&#x27; id=&#x27;140212930739376&#x27;&gt;, args = (&#x27;/api/v1/chat&#x27;,), kwargs = {&#x27;json&#x27;: {&#x27;message&#x27;: &#x27;Hello AI&#x27;}}<br/>_call = call(&#x27;/api/v1/chat&#x27;, json={&#x27;message&#x27;: &#x27;Hello AI&#x27;}), effect = Exception(&#x27;API Error&#x27;)<br/><br/>    async def _execute_mock_call(self, /, *args, **kwargs):<br/>        # This is nearly just like super(), except for special handling<br/>        # of coroutines<br/>    <br/>        _call = _Call((args, kwargs), two=True)<br/>        self.await_count += 1<br/>        self.await_args = _call<br/>        self.await_args_list.append(_call)<br/>    <br/>        effect = self.side_effect<br/>        if effect is not None:<br/>            if _is_exception(effect):<br/>&gt;               raise effect<br/><span class="error">E               Exception: API Error</span><br/><br/>/usr/local/lib/python3.13/unittest/mock.py:2321: Exception<br/></div></td></tr></tbody>
+      <tbody class="failed results-table-row">
+        <tr>
+          <td class="col-result">Failed</td>
+          <td class="col-name">tests/api/test_ai.py::test_chat_with_ai_invalid_response</td>
+          <td class="col-duration">0.00</td>
+          <td class="col-links"></td></tr>
+        <tr class="collapsed">
+          <td class="extra" colspan="4">
+            <div class="log">mock_post = &lt;AsyncMock name=&#x27;post&#x27; id=&#x27;140212928200784&#x27;&gt;, client = &lt;httpx.AsyncClient object at 0x7f85ddc3d0f0&gt;<br/><br/>    @pytest.mark.api<br/>    @pytest.mark.asyncio<br/>    @patch(&quot;backend.app.routers.ai.httpx.AsyncClient.post&quot;)<br/>    async def test_chat_with_ai_invalid_response(mock_post, client: AsyncClient):<br/>        &quot;&quot;&quot;Test handling of invalid API response - 失败用例2&quot;&quot;&quot;<br/>        # Setup mock response with invalid format<br/>        mock_response = AsyncMock()<br/>        mock_response.status_code = 200<br/>        mock_response.json.return_value = {<br/>            &quot;invalid_format&quot;: True,<br/>            &quot;no_choices_field&quot;: &quot;Missing choices field&quot;<br/>        }<br/>        mock_post.return_value = mock_response<br/>    <br/>        # Test data<br/>        chat_request = {<br/>            &quot;message&quot;: &quot;Hello AI&quot;,<br/>            &quot;session_id&quot;: str(uuid.uuid4())<br/>        }<br/>    <br/>        # Make API request<br/>        response = await client.post(&quot;/api/v1/chat&quot;, json=chat_request)<br/>    <br/>        # Expect fallback response due to invalid format<br/>        assert response.status_code == 200<br/>        data = response.json()<br/>&gt;       assert &quot;message&quot; in data<br/><span class="error">E       TypeError: argument of type &#x27;coroutine&#x27; is not iterable</span><br/><br/>tests/api/test_ai.py:199: TypeError<br/></div></td></tr></tbody>
+      <tbody class="failed results-table-row">
+        <tr>
+          <td class="col-result">Failed</td>
+          <td class="col-name">tests/api/test_ai.py::test_chat_with_ai_credits_error</td>
+          <td class="col-duration">0.00</td>
+          <td class="col-links"></td></tr>
+        <tr class="collapsed">
+          <td class="extra" colspan="4">
+            <div class="log">mock_post = &lt;AsyncMock name=&#x27;post&#x27; id=&#x27;140212928201456&#x27;&gt;, client = &lt;httpx.AsyncClient object at 0x7f85ddccc710&gt;<br/><br/>    @pytest.mark.api<br/>    @pytest.mark.asyncio<br/>    @patch(&quot;backend.app.routers.ai.httpx.AsyncClient.post&quot;)<br/>    async def test_chat_with_ai_credits_error(mock_post, client: AsyncClient):<br/>        &quot;&quot;&quot;Test handling of 402 payment required error (credits error) - 失败用例3&quot;&quot;&quot;<br/>        # 创建模拟响应对象，返回402错误<br/>        mock_response = AsyncMock()<br/>        mock_response.status_code = 402<br/>        mock_response.raise_for_status = AsyncMock(side_effect=HTTPStatusError(&quot;Payment required&quot;, request=None, response=mock_response))<br/>        mock_response.json.return_value = {<br/>            &quot;error&quot;: {<br/>                &quot;code&quot;: 402,<br/>                &quot;message&quot;: &quot;This request requires more credits. You requested 1000 tokens, but can only afford 500.&quot;<br/>            }<br/>        }<br/>        mock_response.text = &#x27;{&quot;error&quot;:{&quot;code&quot;:402,&quot;message&quot;:&quot;Credits error&quot;}}&#x27;<br/>        mock_post.return_value = mock_response<br/>    <br/>        # 测试数据<br/>        chat_request = {<br/>            &quot;message&quot;: &quot;需要很多token的大请求&quot;,<br/>            &quot;session_id&quot;: str(uuid.uuid4())<br/>        }<br/>    <br/>        # 发送API请求<br/>        response = await client.post(&quot;/api/v1/chat&quot;, json=chat_request)<br/>    <br/>        # 从环境变量获取错误消息模板<br/>        credits_error_msg = os.environ.get(&quot;AI_CREDITS_ERROR_MSG&quot;, &quot;积分不足&quot;)<br/>    <br/>        # 验证响应 - 应该得到200状态码和特定的错误消息<br/>&gt;       assert response.status_code == 200<br/><span class="error">E       AssertionError: assert 402 == 200</span><br/><span class="error">E        +  where 402 = &lt;AsyncMock name=&#x27;post()&#x27; id=&#x27;140212928203808&#x27;&gt;.status_code</span><br/><br/>tests/api/test_ai.py:237: AssertionError<br/></div></td></tr></tbody>
+      <tbody class="failed results-table-row">
+        <tr>
+          <td class="col-result">Failed</td>
+          <td class="col-name">tests/api/test_items.py::test_delete_item</td>
+          <td class="col-duration">0.15</td>
+          <td class="col-links"></td></tr>
+        <tr class="collapsed">
+          <td class="extra" colspan="4">
+            <div class="log">client = &lt;httpx.AsyncClient object at 0x7f85ddb97070&gt;, db_session = &lt;sqlalchemy.orm.session.AsyncSession object at 0x7f85ddcae3f0&gt;<br/><br/>    @pytest.mark.asyncio<br/>    async def test_delete_item(client: AsyncClient, db_session: AsyncSession):<br/>        &quot;&quot;&quot;Test deleting an item&quot;&quot;&quot;<br/>        # Create test item<br/>        item = Item(name=&quot;Delete Test Item&quot;, description=&quot;This will be deleted&quot;)<br/>        db_session.add(item)<br/>        await db_session.commit()<br/>        await db_session.refresh(item)<br/>    <br/>        # Make API request<br/>        response = await client.delete(f&quot;/api/v1/items/{item.id}&quot;)<br/>    <br/>        # Validate response<br/>        assert response.status_code == 200<br/>        data = response.json()<br/>        assert data[&quot;id&quot;] == str(item.id)<br/>    <br/>        # Verify item was deleted from database<br/>        deleted_item = await db_session.get(Item, item.id)<br/>&gt;       assert deleted_item is None<br/><span class="error">E       assert &lt;Item(id=0790b4b1-509a-429c-b99e-1c0b9b0ffb5e, name=Delete Test Item)&gt; is None</span><br/><br/>tests/api/test_items.py:146: AssertionError<br/> ------------------------------Captured stderr call------------------------------ <br/>2025-04-19 13:07:06,924 - httpx - INFO - HTTP Request: DELETE http://test/api/v1/items/0790b4b1-509a-429c-b99e-1c0b9b0ffb5e &quot;HTTP/1.1 200 OK&quot;
+<br/> -------------------------------Captured log call-------------------------------- <br/>INFO     httpx:_client.py:1729 HTTP Request: DELETE http://test/api/v1/items/0790b4b1-509a-429c-b99e-1c0b9b0ffb5e &quot;HTTP/1.1 200 OK&quot;<br/> ----------------------------Captured stdout teardown---------------------------- <br/>Tearing down test database...
+<br/></div></td></tr></tbody>
+      <tbody class="passed results-table-row">
+        <tr>
+          <td class="col-result">Passed</td>
+          <td class="col-name">tests/api/test_ai.py::test_test_connection_endpoint</td>
+          <td class="col-duration">2.95</td>
+          <td class="col-links"></td></tr>
+        <tr class="collapsed">
+          <td class="extra" colspan="4">
+            <div class="log"> ------------------------------Captured stdout call------------------------------ <br/>
+==================================================
+AI MODULE: Direct API test requested
+==================================================
+
+2025-04-19 13:07:03,123 - backend.app.routers.ai - INFO - Direct API test requested
+
+==================================================
+AI MODULE: Testing connection to https://openrouter.ai/api/v1/chat/completions
+==================================================
+
+2025-04-19 13:07:03,124 - backend.app.routers.ai - INFO - Testing connection to https://openrouter.ai/api/v1/chat/completions
+
+==================================================
+AI MODULE: ✅ Connection to https://openrouter.ai/api/v1/chat/completions successful!
+==================================================
+
+2025-04-19 13:07:05,651 - backend.app.routers.ai - INFO - ✅ Connection to https://openrouter.ai/api/v1/chat/completions successful!
+
+==================================================
+AI MODULE: Testing connection to https://api.openrouter.ai/api/v1/chat/completions
+==================================================
+
+2025-04-19 13:07:05,651 - backend.app.routers.ai - INFO - Testing connection to https://api.openrouter.ai/api/v1/chat/completions
+
+==================================================
+AI MODULE: Error testing https://api.openrouter.ai/api/v1/chat/completions: [Errno -2] Name or service not known
+==================================================
+
+2025-04-19 13:07:06,071 - backend.app.routers.ai - INFO - Error testing https://api.openrouter.ai/api/v1/chat/completions: [Errno -2] Name or service not known
+<br/> ------------------------------Captured stderr call------------------------------ <br/>2025-04-19 13:07:03,123 - backend.app.routers.ai - INFO - Direct API test requested
+2025-04-19 13:07:03,124 - backend.app.routers.ai - INFO - Testing connection to https://openrouter.ai/api/v1/chat/completions
+2025-04-19 13:07:04,251 - httpx - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions &quot;HTTP/1.1 200 OK&quot;
+2025-04-19 13:07:05,651 - backend.app.routers.ai - INFO - ✅ Connection to https://openrouter.ai/api/v1/chat/completions successful!
+2025-04-19 13:07:05,651 - backend.app.routers.ai - INFO - Testing connection to https://api.openrouter.ai/api/v1/chat/completions
+2025-04-19 13:07:06,071 - backend.app.routers.ai - INFO - Error testing https://api.openrouter.ai/api/v1/chat/completions: [Errno -2] Name or service not known
+2025-04-19 13:07:06,072 - httpx - INFO - HTTP Request: GET http://test/api/v1/test-connection &quot;HTTP/1.1 200 OK&quot;
+<br/> -------------------------------Captured log call-------------------------------- <br/>INFO     backend.app.routers.ai:ai.py:34 Direct API test requested
+INFO     backend.app.routers.ai:ai.py:34 Testing connection to https://openrouter.ai/api/v1/chat/completions
+INFO     httpx:_client.py:1729 HTTP Request: POST https://openrouter.ai/api/v1/chat/completions &quot;HTTP/1.1 200 OK&quot;
+INFO     backend.app.routers.ai:ai.py:34 ✅ Connection to https://openrouter.ai/api/v1/chat/completions successful!
+INFO     backend.app.routers.ai:ai.py:34 Testing connection to https://api.openrouter.ai/api/v1/chat/completions
+INFO     backend.app.routers.ai:ai.py:34 Error testing https://api.openrouter.ai/api/v1/chat/completions: [Errno -2] Name or service not known
+INFO     httpx:_client.py:1729 HTTP Request: GET http://test/api/v1/test-connection &quot;HTTP/1.1 200 OK&quot;<br/></div></td></tr></tbody>
+      <tbody class="passed results-table-row">
+        <tr>
+          <td class="col-result">Passed</td>
+          <td class="col-name">tests/api/test_items.py::test_create_item</td>
+          <td class="col-duration">0.21</td>
+          <td class="col-links"></td></tr>
+        <tr class="collapsed">
+          <td class="extra" colspan="4">
+            <div class="log"> -----------------------------Captured stdout setup------------------------------ <br/>Setting up test database...
+<br/> ------------------------------Captured stderr call------------------------------ <br/>2025-04-19 13:07:06,256 - httpx - INFO - HTTP Request: POST http://test/api/v1/items &quot;HTTP/1.1 201 Created&quot;
+<br/> -------------------------------Captured log call-------------------------------- <br/>INFO     httpx:_client.py:1729 HTTP Request: POST http://test/api/v1/items &quot;HTTP/1.1 201 Created&quot;<br/></div></td></tr></tbody>
+      <tbody class="passed results-table-row">
+        <tr>
+          <td class="col-result">Passed</td>
+          <td class="col-name">tests/api/test_items.py::test_read_items</td>
+          <td class="col-duration">0.13</td>
+          <td class="col-links"></td></tr>
+        <tr class="collapsed">
+          <td class="extra" colspan="4">
+            <div class="log"> ------------------------------Captured stderr call------------------------------ <br/>2025-04-19 13:07:06,389 - httpx - INFO - HTTP Request: GET http://test/api/v1/items &quot;HTTP/1.1 200 OK&quot;
+2025-04-19 13:07:06,431 - httpx - INFO - HTTP Request: GET http://test/api/v1/items?skip=1&amp;limit=2 &quot;HTTP/1.1 200 OK&quot;
+<br/> -------------------------------Captured log call-------------------------------- <br/>INFO     httpx:_client.py:1729 HTTP Request: GET http://test/api/v1/items &quot;HTTP/1.1 200 OK&quot;
+INFO     httpx:_client.py:1729 HTTP Request: GET http://test/api/v1/items?skip=1&amp;limit=2 &quot;HTTP/1.1 200 OK&quot;<br/></div></td></tr></tbody>
+      <tbody class="passed results-table-row">
+        <tr>
+          <td class="col-result">Passed</td>
+          <td class="col-name">tests/api/test_items.py::test_read_item</td>
+          <td class="col-duration">0.14</td>
+          <td class="col-links"></td></tr>
+        <tr class="collapsed">
+          <td class="extra" colspan="4">
+            <div class="log"> ------------------------------Captured stderr call------------------------------ <br/>2025-04-19 13:07:06,542 - httpx - INFO - HTTP Request: GET http://test/api/v1/items/cc4c600d-baa2-452c-8221-4629d0d8500b &quot;HTTP/1.1 200 OK&quot;
+2025-04-19 13:07:06,581 - httpx - INFO - HTTP Request: GET http://test/api/v1/items/2360cb37-e160-4167-bc11-1f84cdef229e &quot;HTTP/1.1 404 Not Found&quot;
+<br/> -------------------------------Captured log call-------------------------------- <br/>INFO     httpx:_client.py:1729 HTTP Request: GET http://test/api/v1/items/cc4c600d-baa2-452c-8221-4629d0d8500b &quot;HTTP/1.1 200 OK&quot;
+INFO     httpx:_client.py:1729 HTTP Request: GET http://test/api/v1/items/2360cb37-e160-4167-bc11-1f84cdef229e &quot;HTTP/1.1 404 Not Found&quot;<br/></div></td></tr></tbody>
+      <tbody class="passed results-table-row">
+        <tr>
+          <td class="col-result">Passed</td>
+          <td class="col-name">tests/api/test_items.py::test_update_item</td>
+          <td class="col-duration">0.22</td>
+          <td class="col-links"></td></tr>
+        <tr class="collapsed">
+          <td class="extra" colspan="4">
+            <div class="log"> ------------------------------Captured stderr call------------------------------ <br/>2025-04-19 13:07:06,732 - httpx - INFO - HTTP Request: PUT http://test/api/v1/items/908b0332-c2aa-4330-a31e-7448d042022b &quot;HTTP/1.1 200 OK&quot;
+2025-04-19 13:07:06,808 - httpx - INFO - HTTP Request: PUT http://test/api/v1/items/908b0332-c2aa-4330-a31e-7448d042022b &quot;HTTP/1.1 200 OK&quot;
+<br/> -------------------------------Captured log call-------------------------------- <br/>INFO     httpx:_client.py:1729 HTTP Request: PUT http://test/api/v1/items/908b0332-c2aa-4330-a31e-7448d042022b &quot;HTTP/1.1 200 OK&quot;
+INFO     httpx:_client.py:1729 HTTP Request: PUT http://test/api/v1/items/908b0332-c2aa-4330-a31e-7448d042022b &quot;HTTP/1.1 200 OK&quot;<br/></div></td></tr></tbody></table></body></html>
