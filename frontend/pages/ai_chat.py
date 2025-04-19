@@ -1,171 +1,135 @@
+"""
+AI聊天助手页面
+"""
+import os
+import sys
+from pathlib import Path
 import asyncio
-import uuid
-from typing import Dict, List, Optional
+import time
+from datetime import datetime
+
+# 添加必要的路径以确保导入正常工作
+current_file = Path(__file__).resolve()
+pages_dir = current_file.parent
+frontend_dir = pages_dir.parent
+project_root = frontend_dir.parent
+
+# 将项目根目录添加到Python路径
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
 
 import streamlit as st
-import httpx
 
-from streamlit_app import (
-    API_BASE_URL,
-    create_item,
-    delete_item,
-    fetch_items,
-    initialize_session_state,
-    update_item,
-    send_message_to_ai,
+# 导入工具模块
+from frontend.utils.styles import get_chat_css
+from frontend.utils.session import (
+    initialize_session_state, 
+    initialize_chat_history,
+    format_chat_context,
+    clear_chat_history
 )
+from frontend.utils.api import run_async, stream_chat_message
+
+# 导入组件
+from frontend.components.chat_message import render_chat_history
+from frontend.components.model_selector import model_selector
+from frontend.components.chat_input import fixed_bottom_input_container
 
 
 def ai_chat_page():
-    """AI Chat Assistant Page"""
-    st.title("AI 助手")
+    """AI聊天助手页面 (using st.chat_input and st.chat_message)"""
+    # Page config should ideally be in the main app file (streamlit_app.py)
+    # But we keep it here for now if this page can be run standalone
+    st.set_page_config(
+        page_title="AI 助手",
+        page_icon="🤖",
+        layout="wide",
+        initial_sidebar_state="collapsed"
+    )
     
-    # 添加自定义CSS来隐藏Streamlit的主进度条和状态消息
-    hide_streamlit_elements = """
-        <style>
-        #MainMenu {visibility: hidden;}
-        div[data-testid="stStatusWidget"] {display: none !important;}
-        div.stSpinner > div {display:none !important;}
-        /* 隐藏RUNNING...指示器 */
-        .element-container:has(> div.stMarkdown > div > p:contains("RUNNING")) {display: none;}
-        </style>
-    """
-    st.markdown(hide_streamlit_elements, unsafe_allow_html=True)
+    # Apply custom CSS
+    st.markdown(get_chat_css(), unsafe_allow_html=True)
     
-    # Initialize session state
+    # Initialize session state (chat history, session_id, etc.)
     initialize_session_state()
-    if not hasattr(st.session_state, "items") or not isinstance(st.session_state.items, list):
-        st.session_state.items = []
+    initialize_chat_history() # Ensures st.session_state.chat_history exists
     
-    # Display chat history
-    display_chat_history()
-    
-    # Chat input
-    chat_input()
-
-
-def display_chat_history():
-    """Display the chat history"""
-    # Create a container for the chat history
-    chat_container = st.container()
-    
-    with chat_container:
-        # Display a welcome message if no chat history
-        if not st.session_state.chat_history:
-            st.info("👋 你好！我是AI助手，有什么可以帮助你的吗？")
-        
-        # Display chat messages
-        for message in st.session_state.chat_history:
-            is_user = message.get("role") == "user"
-            avatar = "👤" if is_user else "🤖"
-            message_align = "right" if is_user else "left"
-            
-            # Create columns for better layout
-            col1, col2 = st.columns([1, 9])
-            
-            with col1:
-                st.text(avatar)
-            
-            with col2:
-                st.markdown(
-                    f"<div style='text-align: {message_align};'>"
-                    f"<p style='background-color: {'#e6f7ff' if not is_user else '#f0f0f0'}; "
-                    f"padding: 10px; border-radius: 10px; display: inline-block; "
-                    f"max-width: 80%;'>"
-                    f"{message['content']}</p></div>",
-                    unsafe_allow_html=True
-                )
-
-
-def chat_input():
-    """Chat input form"""
-    # Create a form for the chat input
-    with st.form(key="chat_form", clear_on_submit=True):
-        user_input = st.text_area(
-            "输入你的问题:",
-            key="user_message",
-            height=100,
-        )
-        
-        submit_button = st.form_submit_button("发送")
-        
-        if submit_button and user_input:
-            # Add user message to chat history
-            st.session_state.chat_history.append({"role": "user", "content": user_input})
-            
-            # Prepare context for the API
-            context = [
-                {"role": msg["role"], "content": msg["content"]}
-                for msg in st.session_state.chat_history[:-1]  # 排除刚刚添加的消息
-                if msg.get("role") in ["user", "assistant"]
-            ]
-            
-            # 添加一个空占位符用于流式显示AI回应
-            ai_response_placeholder = st.empty()
-            
-            # 累积的响应内容
-            streaming_content = ""
-            
-            # 流式发送消息到API
-            async def stream_response():
-                nonlocal streaming_content
-                try:
-                    async with httpx.AsyncClient() as client:
-                        request_data = {
-                            "message": user_input,
-                            "session_id": st.session_state.session_id,
-                            "context": context
-                        }
-                        
-                        # 创建流式请求
-                        async with client.stream("POST", f"{API_BASE_URL}/chat/stream", json=request_data, timeout=60.0) as response:
-                            if response.status_code == 200:
-                                # 流式处理响应
-                                async for chunk in response.aiter_text():
-                                    # 更新累积内容
-                                    streaming_content += chunk
-                                    
-                                    # 更新显示占位符
-                                    ai_response_placeholder.markdown(
-                                        f"<div style='text-align: left;'>"
-                                        f"<p style='background-color: #e6f7ff; "
-                                        f"padding: 10px; border-radius: 10px; display: inline-block; "
-                                        f"max-width: 80%;'>"
-                                        f"{streaming_content}</p></div>",
-                                        unsafe_allow_html=True
-                                    )
-                            else:
-                                # 处理错误响应
-                                error_text = await response.text()
-                                error_message = f"Error: {response.status_code} - {error_text}"
-                                ai_response_placeholder.error(f"API错误: {error_message}")
-                                streaming_content = f"抱歉，我遇到了一个技术问题，无法回应。请稍后再试。"
-                    
-                    # 流式响应完成后，将最终内容添加到聊天历史
-                    st.session_state.chat_history.append(
-                        {"role": "assistant", "content": streaming_content}
-                    )
-                    
-                except Exception as e:
-                    error_message = f"发生错误: {str(e)}"
-                    ai_response_placeholder.error(error_message)
-                    st.session_state.chat_history.append(
-                        {"role": "assistant", "content": f"抱歉，发生了错误: {str(e)}"}
-                    )
-            
-            # 执行异步流式响应
-            try:
-                asyncio.run(stream_response())
-            except RuntimeError:
-                # 处理asyncio运行时错误
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                loop.run_until_complete(stream_response())
-                
-            # 更新会话状态
+    # --- Sidebar --- 
+    with st.sidebar:
+        st.title("模型选择")
+        selected_model = model_selector()
+        if st.button("清空聊天记录", key="clear_chat_sidebar"):
+            clear_chat_history()
             st.rerun()
 
+    # --- Main Chat Area --- 
+    st.markdown("## AI 助手") # Title for the main area
 
-# Run the page
+    # Display existing chat messages using the updated renderer
+    # This now uses st.chat_message internally
+    render_chat_history(st.session_state.chat_history)
+    
+    # Placeholder for streaming AI response
+    # This needs to be defined *before* the input, but updated *after* the input is processed
+    streaming_placeholder = st.empty()
+
+    # --- Chat Input --- 
+    # Use the function that wraps st.chat_input
+    prompt, send_triggered = fixed_bottom_input_container() 
+
+    # --- Process Input and Call API --- 
+    if send_triggered and prompt: 
+        current_input = prompt # Input from st.chat_input
+
+        # Add user message to history
+        st.session_state.chat_history.append({"role": "user", "content": current_input})
+        
+        # Immediately display the user message by re-rendering history
+        # (st.chat_input causes a rerun, so this should happen automatically)
+        # We might still need a rerun if the user message doesn't show up instantly.
+        # st.rerun() # Temporarily commented out, let st.chat_input handle rerun
+
+        # Prepare for AI response
+        context = format_chat_context()
+        message_index = len(st.session_state.chat_history) # Index for the upcoming AI message
+        st.session_state.chat_history.append({"role": "assistant", "content": ""}) # Add empty AI message
+
+        # Set streaming flag
+        st.session_state.streaming = True
+
+        # Callback function to update the *separate* placeholder
+        def update_placeholder(content):
+            streaming_placeholder.markdown(content + "▌")
+            # Update the actual content in history silently
+            st.session_state.chat_history[message_index]["content"] = content
+
+        # Call the streaming API
+        full_response = run_async(
+            stream_chat_message,
+            current_input,
+            st.session_state.session_id,
+            context,
+            selected_model if selected_model != "默认模型" else None,
+            update_placeholder # Pass the callback
+        )
+        
+        # Streaming finished
+        st.session_state.streaming = False
+        
+        # Update the final message in history and clear the placeholder
+        if full_response:
+            st.session_state.chat_history[message_index]["content"] = full_response
+            streaming_placeholder.empty() # Clear the external placeholder
+        else:
+             # Handle potential errors if needed, e.g., display error in chat
+             error_content = "抱歉，AI回复时出现错误。"
+             st.session_state.chat_history[message_index]["content"] = error_content
+             streaming_placeholder.empty()
+
+        # Rerun to display the final AI message rendered by render_chat_history
+        st.rerun()
+
+
+# Run page if executed directly
 if __name__ == "__main__":
     ai_chat_page()

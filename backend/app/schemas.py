@@ -38,6 +38,7 @@ class ChatRequest(BaseModel):
     message: str
     session_id: Optional[UUID] = None
     context: Optional[List[dict]] = Field(default_factory=list)
+    model: Optional[str] = None
 
 
 class ChatResponse(BaseModel):

@@ -1,200 +1,224 @@
+"""
+数据管理页面
+"""
+import os
+import sys
+from pathlib import Path
+
+# 添加必要的路径以确保导入正常工作
+current_file = Path(__file__).resolve()
+pages_dir = current_file.parent
+frontend_dir = pages_dir.parent
+project_root = frontend_dir.parent
+
+# 将项目根目录添加到Python路径
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+
 import asyncio
-import uuid
-from typing import Dict, List, Optional
-
 import streamlit as st
+import httpx
 
-from streamlit_app import (
-    API_BASE_URL,
-    create_item,
-    delete_item,
-    fetch_items,
-    initialize_session_state,
-    update_item,
-    send_message_to_ai,
-)
+from frontend.utils.session import initialize_session_state
+from frontend.utils.api import API_BASE_URL
 
 
-def data_management_page():
-    """Data Management Page for CRUD operations"""
+async def fetch_items():
+    """从API获取项目"""
+    async with httpx.AsyncClient() as client:
+        response = await client.get(f"{API_BASE_URL}/items")
+        if response.status_code == 200:
+            data = response.json()
+            return data["items"], data["total"]
+        else:
+            st.error(f"获取项目错误: {response.text}")
+            return [], 0
+
+
+async def create_item(name, description=None):
+    """通过API创建新项目"""
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            f"{API_BASE_URL}/items",
+            json={"name": name, "description": description},
+        )
+        if response.status_code == 201:
+            return response.json()
+        else:
+            st.error(f"创建项目错误: {response.text}")
+            return None
+
+
+async def update_item(item_id, name=None, description=None):
+    """通过API更新项目"""
+    data = {}
+    if name:
+        data["name"] = name
+    if description:
+        data["description"] = description
+    
+    async with httpx.AsyncClient() as client:
+        response = await client.put(
+            f"{API_BASE_URL}/items/{item_id}",
+            json=data,
+        )
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"更新项目错误: {response.text}")
+            return None
+
+
+async def delete_item(item_id):
+    """通过API删除项目"""
+    async with httpx.AsyncClient() as client:
+        response = await client.delete(f"{API_BASE_URL}/items/{item_id}")
+        if response.status_code == 200:
+            return True
+        else:
+            st.error(f"删除项目错误: {response.text}")
+            return False
+
+
+def display_data_management():
+    """显示数据管理页面"""
     st.title("数据管理")
     
-    # Initialize session state
+    # 初始化会话状态
     initialize_session_state()
-    if not hasattr(st.session_state, "items") or not isinstance(st.session_state.items, list):
-        st.session_state.items = []
     
-    # Create tabs for different operations
-    tab1, tab2, tab3 = st.tabs(["查看数据", "添加数据", "编辑/删除数据"])
-    
-    with tab1:
-        view_items()
-    
-    with tab2:
-        add_item_form()
-    
-    with tab3:
-        edit_delete_items()
-
-
-def view_items():
-    """Display items in a table format"""
-    
-    # 使用临时变量并检查items类型
+    # 修复items问题
     temp_items = st.session_state.get("items")
-    
-    # 如果items是方法或者不是列表，重置为空列表
     if callable(temp_items) or not isinstance(temp_items, list):
         temp_items = []
-        # 同时更新session state
         st.session_state["items"] = temp_items
     
-    # 现在使用temp_items而不是直接访问session_state
-    if not temp_items:
-        st.info("No items found. Create some using the form above.")
-        return
+    # 如果刚进入页面且没有数据，自动获取
+    if not temp_items and not hasattr(st.session_state, "data_loaded"):
+        with st.spinner("加载数据中..."):
+            try:
+                items, _ = asyncio.run(fetch_items())
+                st.session_state.items = items if isinstance(items, list) else []
+                st.session_state.data_loaded = True
+            except Exception as e:
+                st.error(f"加载数据失败: {e}")
+                st.session_state.items = []
     
-    # 使用临时变量创建数据
-    try:
-        items_data = []
+    # 添加新项目表单
+    with st.expander("添加新项目", expanded=False):
+        with st.form("new_item_form"):
+            name = st.text_input("名称")
+            description = st.text_area("描述")
+            submit_button = st.form_submit_button("创建项目")
+            
+            if submit_button and name:
+                st.session_state.form_submitted = True
+                st.session_state.form_data = {"name": name, "description": description}
+                st.rerun()
+    
+    # 处理表单提交 (重新运行后，避免streamlit表单问题)
+    if hasattr(st.session_state, "form_submitted") and st.session_state.form_submitted:
+        with st.spinner("创建项目中..."):
+            result = asyncio.run(create_item(
+                st.session_state.form_data["name"],
+                st.session_state.form_data["description"]
+            ))
+            if result:
+                st.success("项目创建成功!")
+                # 刷新项目列表
+                items, _ = asyncio.run(fetch_items())
+                st.session_state.items = items if isinstance(items, list) else []
+        
+        # 重置表单状态
+        del st.session_state.form_submitted
+        del st.session_state.form_data
+    
+    # 显示项目表格
+    st.subheader("项目列表")
+    
+    # 获取最新的项目列表
+    temp_items = st.session_state.items
+    
+    if not temp_items:
+        st.info("没有找到项目。")
+    else:
+        # 创建用于显示的数据框
+        df_data = []
         for item in temp_items:
-            items_data.append({
+            df_data.append({
                 "ID": item["id"],
-                "Name": item["name"],
-                "Description": item["description"] or "",
-                "Created": item["created_at"]
+                "名称": item["name"],
+                "描述": item["description"] or "",
+                "创建时间": item["created_at"].split("T")[0],  # 只显示日期部分
             })
         
-        # 创建数据框并显示
-        st.dataframe(items_data, use_container_width=True)
-    except Exception as e:
-        st.error(f"Error displaying items: {str(e)}")
-        # 如果出错，重置items为空列表
-        st.session_state["items"] = []
-
-
-def add_item_form():
-    """Form for adding a new item"""
-    st.subheader("添加新数据项")
-    
-    # Initialize form state if needed
-    if "form_submitted" not in st.session_state:
-        st.session_state.form_submitted = False
-    
-    # Reset form if previously submitted
-    if st.session_state.form_submitted:
-        # Use this approach to clear the form fields through rerun
-        st.session_state.form_submitted = False
-        st.session_state.add_name = ""
-        st.session_state.add_description = ""
-        st.rerun()
-    
-    with st.form("add_item_form"):
-        name = st.text_input("名称", key="add_name")
-        description = st.text_area("描述", key="add_description")
+        # 显示为数据框
+        st.dataframe(df_data, use_container_width=True)
         
-        submitted = st.form_submit_button("添加")
+        # 项目操作
+        st.subheader("项目操作")
         
-        if submitted:
-            if not name:
-                st.error("名称不能为空")
-            else:
-                with st.spinner("添加中..."):
-                    new_item = asyncio.run(create_item(name, description))
-                    
-                    if new_item:
-                        st.success(f"成功添加: {name}")
-                        # Set flag to clear form on next render
-                        st.session_state.form_submitted = True
-                        # Refresh items list
-                        st.session_state.items = []
-                        st.rerun()
-
-
-def edit_delete_items():
-    """Interface for editing and deleting items"""
-    st.subheader("编辑/删除数据项")
-    
-    # 使用临时变量并检查类型
-    temp_items = st.session_state.get("items")
-    
-    # 如果items是方法或者不是列表，重置为空列表
-    if callable(temp_items) or not isinstance(temp_items, list):
-        temp_items = []
-        # 同时更新session state
-        st.session_state["items"] = temp_items
-    
-    # Fetch items if needed
-    if not temp_items:
-        with st.spinner("加载数据中..."):
-            items, total = asyncio.run(fetch_items())
-            temp_items = items if isinstance(items, list) else []
-            st.session_state["items"] = temp_items
-    
-    if not temp_items:
-        st.info("暂无数据可编辑")
-        return
-    
-    # 使用临时变量而非直接访问session_state
-    item_options = {f"{item['name']} (ID: {item['id']})": item for item in temp_items}
-    
-    # Select an item to edit/delete
-    selected_item_key = st.selectbox(
-        "选择要编辑/删除的数据项",
-        options=list(item_options.keys()),
-        key="edit_select"
-    )
-    
-    if selected_item_key:
-        selected_item = item_options[selected_item_key]
+        # 选择一个项目
+        item_names = [f"{item['name']} ({item['id'][:8]}...)" for item in temp_items]
+        selected_item_idx = st.selectbox("选择一个项目", range(len(item_names)), format_func=lambda i: item_names[i])
+        selected_item = temp_items[selected_item_idx]
         
-        # Display current values
-        st.text(f"当前名称: {selected_item['name']}")
-        st.text(f"当前描述: {selected_item['description'] or '无'}")
+        # 操作选项卡
+        tab1, tab2 = st.tabs(["编辑", "删除"])
         
-        # Edit form
-        with st.form("edit_item_form"):
-            new_name = st.text_input("新名称", value=selected_item['name'], key="edit_name")
-            new_description = st.text_area(
-                "新描述", 
-                value=selected_item['description'] or "", 
-                key="edit_description"
-            )
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                update_button = st.form_submit_button("更新")
-            with col2:
-                delete_button = st.form_submit_button("删除", type="primary")
-            
-            if update_button:
-                if not new_name:
-                    st.error("名称不能为空")
-                else:
-                    with st.spinner("更新中..."):
-                        updated_item = asyncio.run(
-                            update_item(
-                                selected_item['id'],
-                                new_name,
-                                new_description
-                            )
-                        )
-                        
-                        if updated_item:
-                            st.success(f"成功更新: {new_name}")
-                            # Refresh items list
-                            st.session_state.items = []
-            
-            if delete_button:
-                with st.spinner("删除中..."):
-                    deleted_item = asyncio.run(delete_item(selected_item['id']))
-                    
-                    if deleted_item:
-                        st.success(f"成功删除: {selected_item['name']}")
-                        # Refresh items list
-                        st.session_state.items = []
+        with tab1:
+            with st.form("edit_item_form"):
+                edit_name = st.text_input("名称", value=selected_item["name"])
+                edit_description = st.text_area("描述", value=selected_item["description"] or "")
+                update_button = st.form_submit_button("更新项目")
+                
+                if update_button:
+                    st.session_state.update_submitted = True
+                    st.session_state.update_data = {
+                        "id": selected_item["id"],
+                        "name": edit_name,
+                        "description": edit_description
+                    }
+                    st.rerun()
+        
+        with tab2:
+            st.write("确定要删除这个项目吗?")
+            if st.button(f"删除 {selected_item['name']}", type="primary"):
+                st.session_state.delete_id = selected_item["id"]
+                st.rerun()
+    
+    # 处理更新提交
+    if hasattr(st.session_state, "update_submitted") and st.session_state.update_submitted:
+        with st.spinner("更新项目中..."):
+            result = asyncio.run(update_item(
+                st.session_state.update_data["id"], 
+                st.session_state.update_data["name"],
+                st.session_state.update_data["description"]
+            ))
+            if result:
+                st.success("项目更新成功!")
+                # 刷新项目列表
+                items, _ = asyncio.run(fetch_items())
+                st.session_state.items = items if isinstance(items, list) else []
+        
+        # 重置更新状态
+        del st.session_state.update_submitted
+        del st.session_state.update_data
+    
+    # 处理删除提交
+    if hasattr(st.session_state, "delete_id"):
+        with st.spinner("删除项目中..."):
+            result = asyncio.run(delete_item(st.session_state.delete_id))
+            if result:
+                st.success("项目删除成功!")
+                # 刷新项目列表
+                items, _ = asyncio.run(fetch_items())
+                st.session_state.items = items if isinstance(items, list) else []
+        
+        # 重置删除状态
+        del st.session_state.delete_id
 
 
-# Run the page
+# 运行页面
 if __name__ == "__main__":
-    data_management_page()
+    display_data_management()

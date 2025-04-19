@@ -169,6 +169,14 @@ async def chat(request: ChatRequest):
     # Generate a session ID if not provided
     session_id = request.session_id or uuid.uuid4()
     
+    # 如果请求中指定了模型，使用请求中的模型
+    request_model = request.model
+    if request_model and request_model.strip():
+        console_log(f"使用请求指定的模型: {request_model}")
+        current_model = request_model
+    else:
+        current_model = MODEL_NAME
+    
     # Check if API key is available (and not empty string)
     if not OPENROUTER_API_KEY or OPENROUTER_API_KEY.strip() == "":
         logger.error("Missing or empty OpenRouter API key")
@@ -178,15 +186,14 @@ async def chat(request: ChatRequest):
         )
     
     # Check if model name is available
-    if not MODEL_NAME or MODEL_NAME.strip() == "":
-        logger.error("Missing or empty MODEL_NAME environment variable")
+    if not current_model or current_model.strip() == "":
+        logger.error("Missing or empty model name")
         raise HTTPException(
             status_code=500,
-            detail="MODEL_NAME not configured or empty - check server logs"
+            detail="Model name not configured or empty - check server logs"
         )
     
     # Apply Qwen-specific checks based on model
-    current_model = MODEL_NAME.strip()
     if "qwen" in current_model.lower():
         logger.info(f"Qwen model detected: {current_model}")
         # Check if Qwen model is available on OpenRouter
@@ -209,7 +216,7 @@ async def chat(request: ChatRequest):
         # Log the API key being used (partially masked)
         masked_key = f"{OPENROUTER_API_KEY[:8]}...{OPENROUTER_API_KEY[-4:]}" if len(OPENROUTER_API_KEY) > 12 else OPENROUTER_API_KEY
         logger.info(f"Attempting OpenRouter request with API Key: {masked_key}")
-        logger.info(f"Using model: '{MODEL_NAME}'")
+        logger.info(f"Using model: '{current_model}'")
         
         # Call the OpenRouter API
         async with httpx.AsyncClient() as client:
@@ -218,7 +225,7 @@ async def chat(request: ChatRequest):
             
             # Check if the model is likely a Qwen model
             fallback_model = None
-            try_model = MODEL_NAME
+            try_model = current_model
             
             # Always define a fallback model for reliability
             fallback_model = "anthropic/claude-3-haiku"
@@ -478,6 +485,14 @@ async def chat_stream(request: ChatRequest):
     # Generate a session ID if not provided
     session_id = request.session_id or uuid.uuid4()
     
+    # 如果请求中指定了模型，使用请求中的模型
+    request_model = request.model
+    if request_model and request_model.strip():
+        console_log(f"使用请求指定的模型: {request_model}")
+        current_model = request_model
+    else:
+        current_model = MODEL_NAME
+    
     # Check if API key is available (and not empty string)
     if not OPENROUTER_API_KEY or OPENROUTER_API_KEY.strip() == "":
         logger.error("Missing or empty OpenRouter API key")
@@ -487,11 +502,11 @@ async def chat_stream(request: ChatRequest):
         )
     
     # Check if model name is available
-    if not MODEL_NAME or MODEL_NAME.strip() == "":
-        logger.error("Missing or empty MODEL_NAME environment variable")
+    if not current_model or current_model.strip() == "":
+        logger.error("Missing or empty model name")
         raise HTTPException(
             status_code=500,
-            detail="MODEL_NAME not configured or empty - check server logs"
+            detail="Model name not configured or empty - check server logs"
         )
     
     # Prepare the context for the AI model
@@ -509,7 +524,7 @@ async def chat_stream(request: ChatRequest):
         # Log the API key being used (partially masked)
         masked_key = f"{OPENROUTER_API_KEY[:8]}...{OPENROUTER_API_KEY[-4:]}" if len(OPENROUTER_API_KEY) > 12 else OPENROUTER_API_KEY
         logger.info(f"Attempting OpenRouter streaming request with API Key: {masked_key}")
-        logger.info(f"Using model: '{MODEL_NAME}'")
+        logger.info(f"Using model: '{current_model}'")
         
         # Prepare the streaming response
         from fastapi.responses import StreamingResponse
@@ -526,7 +541,7 @@ async def chat_stream(request: ChatRequest):
             if not all_urls_to_try:
                 all_urls_to_try = ["https://openrouter.ai/api/v1/chat/completions"]
                 
-            try_model = MODEL_NAME
+            try_model = current_model
             fallback_model = "anthropic/claude-3-haiku"
             
             # Headers required by OpenRouter
@@ -542,6 +557,10 @@ async def chat_stream(request: ChatRequest):
                 "max_tokens": 500,
                 "stream": True  # Enable streaming
             }
+            
+            # 如果处理新模型，添加备注到日志
+            if try_model != MODEL_NAME:
+                console_log(f"正在使用非默认模型: {try_model}，默认模型是: {MODEL_NAME}")
             
             success = False
             
