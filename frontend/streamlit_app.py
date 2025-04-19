@@ -142,6 +142,85 @@ async def send_message_to_ai(message: str) -> dict:
             }
 
 
+async def send_message_to_ai_stream(message: str, session_id: str) -> None:
+    """Send a message to the AI and get a streaming response, updating session state directly"""
+    # Format context for the AI
+    context = [
+        {"role": "system", "content": "You are a helpful assistant."},
+    ]
+    
+    # Add chat history as context (last 5 messages)
+    for msg in st.session_state.chat_history[-5:]:
+        # Add safety check to handle different message formats
+        if isinstance(msg, dict):
+            # If message has 'is_user' key, use it; otherwise try to determine from content or default to 'user'
+            if "is_user" in msg:
+                role = "user" if msg["is_user"] else "assistant" 
+            elif "role" in msg:
+                role = msg["role"]
+            else:
+                role = "user"  # Default role
+            
+            content = msg.get("content", "")
+            context.append({"role": role, "content": content})
+    
+    # Add a placeholder in streamlit for the streaming response
+    ai_placeholder = st.empty()
+    streaming_content = ""
+    
+    try:
+        async with httpx.AsyncClient() as client:
+            request_data = {
+                "message": message,
+                "session_id": session_id,
+                "context": context
+            }
+            
+            # Make the streaming request
+            async with client.stream("POST", f"{API_BASE_URL}/chat/stream", json=request_data, timeout=60.0) as response:
+                if response.status_code == 200:
+                    # Process the streaming response
+                    async for chunk in response.aiter_text():
+                        # Update our accumulated content
+                        streaming_content += chunk
+                        
+                        # Update the placeholder with the current content
+                        ai_placeholder.markdown(f"🤖 **AI:** {streaming_content}")
+                        
+                        # Update the session state with the latest content
+                        # Find and update the last AI message in chat history
+                        if st.session_state.chat_history and not st.session_state.chat_history[-1].get("is_user", True):
+                            # Update the existing AI message
+                            st.session_state.chat_history[-1]["content"] = streaming_content
+                        else:
+                            # Add a new AI message
+                            st.session_state.chat_history.append({
+                                "is_user": False,
+                                "content": streaming_content
+                            })
+                else:
+                    # Handle error response
+                    error_text = await response.text()
+                    error_message = f"Error: {response.status_code} - {error_text}"
+                    ai_placeholder.markdown(f"🤖 **AI:** {error_message}")
+                    
+                    # Add error message to chat history
+                    st.session_state.chat_history.append({
+                        "is_user": False,
+                        "content": error_message
+                    })
+    
+    except Exception as e:
+        error_message = f"Error communicating with AI service: {str(e)}"
+        ai_placeholder.markdown(f"🤖 **AI:** {error_message}")
+        
+        # Add error message to chat history
+        st.session_state.chat_history.append({
+            "is_user": False,
+            "content": error_message
+        })
+
+
 def display_dashboard():
     """Display the dashboard page"""
     st.title("Dashboard")
@@ -363,23 +442,76 @@ def display_ai_assistant():
             "content": user_input
         })
         
-        # Show a spinner while waiting for AI response
-        with st.spinner("AI is thinking..."):
-            import asyncio
+        # Get formatted context for the AI
+        context = [
+            {"role": "system", "content": "You are a helpful assistant."},
+        ]
+        
+        # Add chat history as context (last 5 messages)
+        for msg in st.session_state.chat_history[-6:-1]:  # 不包括刚刚添加的消息
+            if isinstance(msg, dict):
+                role = "user" if msg.get("is_user", False) else "assistant"
+                content = msg.get("content", "")
+                context.append({"role": role, "content": content})
+        
+        # Add the current message to context
+        context.append({"role": "user", "content": user_input})
+        
+        # 直接在这里开始流式响应，而不是添加空消息然后重新运行
+        import asyncio
+        
+        # 创建一个空的占位符用于流式显示
+        ai_message_placeholder = st.empty()
+        
+        # 累积响应的内容
+        streaming_content = ""
+        
+        async def stream_response():
+            nonlocal streaming_content
             try:
-                response = asyncio.run(send_message_to_ai(user_input))
-            except RuntimeError:
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                response = loop.run_until_complete(send_message_to_ai(user_input))
-            # Add AI response to history
+                async with httpx.AsyncClient() as client:
+                    request_data = {
+                        "message": user_input,
+                        "session_id": st.session_state.session_id,
+                        "context": context
+                    }
+                    
+                    # Make the streaming request
+                    async with client.stream("POST", f"{API_BASE_URL}/chat/stream", json=request_data, timeout=60.0) as response:
+                        if response.status_code == 200:
+                            # Process the streaming response
+                            async for chunk in response.aiter_text():
+                                # Update our accumulated content
+                                streaming_content += chunk
+                                
+                                # Update the placeholder with the current content
+                                ai_message_placeholder.markdown(f"🤖 **AI:** {streaming_content}")
+                        else:
+                            # Handle error response
+                            error_text = await response.text()
+                            error_message = f"Error: {response.status_code} - {error_text}"
+                            ai_message_placeholder.markdown(f"🤖 **AI:** {error_message}")
+                            streaming_content = error_message
+            
+            except Exception as e:
+                error_message = f"Error communicating with AI service: {str(e)}"
+                ai_message_placeholder.markdown(f"🤖 **AI:** {error_message}")
+                streaming_content = error_message
+            
+            # 完成流式响应后，将完整内容添加到聊天历史
             st.session_state.chat_history.append({
                 "is_user": False,
-                "content": response["message"]
+                "content": streaming_content
             })
         
-        # Rerun to update the UI
-        st.rerun()
+        # 执行异步函数
+        try:
+            asyncio.run(stream_response())
+        except RuntimeError:
+            # Handle asyncio runtime error
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(stream_response())
     
     # Clear chat history if requested
     if clear_button:
@@ -395,6 +527,21 @@ def main():
         page_icon="🤖",
         layout="wide",
     )
+    
+    # 添加自定义CSS来隐藏Streamlit的主进度条和状态消息
+    hide_streamlit_elements = """
+        <style>
+        #MainMenu {visibility: hidden;}
+        div[data-testid="stStatusWidget"] {display: none !important;}
+        header {visibility: hidden;}
+        .stDeployButton {display:none;}
+        div[data-testid="stToolbar"] {visibility: hidden;}
+        div.stSpinner > div {display:none !important;}
+        /* 隐藏RUNNING...指示器 */
+        .element-container:has(> div.stMarkdown > div > p:contains("RUNNING")) {display: none;}
+        </style>
+    """
+    st.markdown(hide_streamlit_elements, unsafe_allow_html=True)
     
     # Initialize session state
     initialize_session_state()

@@ -469,6 +469,159 @@ async def chat(request: ChatRequest):
             detail=f"Unexpected error: {str(e)}"
         )
 
+@router.post("/chat/stream")
+async def chat_stream(request: ChatRequest):
+    """Process a chat message using OpenRouter API with streaming response"""
+    # 在函数开头声明global
+    global OPENROUTER_API_URL
+    
+    # Generate a session ID if not provided
+    session_id = request.session_id or uuid.uuid4()
+    
+    # Check if API key is available (and not empty string)
+    if not OPENROUTER_API_KEY or OPENROUTER_API_KEY.strip() == "":
+        logger.error("Missing or empty OpenRouter API key")
+        raise HTTPException(
+            status_code=500,
+            detail="API key not configured or empty - check server logs"
+        )
+    
+    # Check if model name is available
+    if not MODEL_NAME or MODEL_NAME.strip() == "":
+        logger.error("Missing or empty MODEL_NAME environment variable")
+        raise HTTPException(
+            status_code=500,
+            detail="MODEL_NAME not configured or empty - check server logs"
+        )
+    
+    # Prepare the context for the AI model
+    messages = []
+    
+    # Add context from previous messages if available
+    if request.context:
+        for msg in request.context:
+            messages.append(msg)
+    
+    # Add the current message
+    messages.append({"role": "user", "content": request.message})
+    
+    try:
+        # Log the API key being used (partially masked)
+        masked_key = f"{OPENROUTER_API_KEY[:8]}...{OPENROUTER_API_KEY[-4:]}" if len(OPENROUTER_API_KEY) > 12 else OPENROUTER_API_KEY
+        logger.info(f"Attempting OpenRouter streaming request with API Key: {masked_key}")
+        logger.info(f"Using model: '{MODEL_NAME}'")
+        
+        # Prepare the streaming response
+        from fastapi.responses import StreamingResponse
+        
+        async def stream_generator():
+            # Try each API URL in turn
+            all_urls_to_try = []
+            if OPENROUTER_API_URL:
+                all_urls_to_try.append(OPENROUTER_API_URL)
+            # 添加所有不在列表中且不为None的备用URL    
+            all_urls_to_try.extend([url for url in ALTERNATE_API_URLS if url and url not in all_urls_to_try])
+            
+            # 确保我们至少有一个URL可以尝试
+            if not all_urls_to_try:
+                all_urls_to_try = ["https://openrouter.ai/api/v1/chat/completions"]
+                
+            try_model = MODEL_NAME
+            fallback_model = "anthropic/claude-3-haiku"
+            
+            # Headers required by OpenRouter
+            headers = {
+                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                "Content-Type": "application/json"
+            }
+            
+            # Payload with streaming enabled
+            payload = {
+                "model": try_model,
+                "messages": messages,
+                "max_tokens": 500,
+                "stream": True  # Enable streaming
+            }
+            
+            success = False
+            
+            # Try each URL in turn
+            for current_url in all_urls_to_try:
+                try:
+                    # Make the streaming request
+                    async with httpx.AsyncClient(timeout=60.0) as client:
+                        async with client.stream("POST", current_url, json=payload, headers=headers) as response:
+                            if response.status_code == 200:
+                                # Successfully connected, start streaming
+                                success = True
+                                
+                                # Process the SSE stream
+                                buffer = ""
+                                async for chunk in response.aiter_text():
+                                    # Process SSE format
+                                    buffer += chunk
+                                    while "data:" in buffer:
+                                        # Find and extract SSE data
+                                        parts = buffer.split("data:", 1)
+                                        if len(parts) < 2:
+                                            break
+                                        
+                                        # Find the end of the data part
+                                        data_parts = parts[1].split("\n\n", 1)
+                                        if len(data_parts) < 2:
+                                            # Not a complete message yet
+                                            break
+                                        
+                                        data = data_parts[0].strip()
+                                        buffer = data_parts[1]
+                                        
+                                        if data == "[DONE]":
+                                            # End of stream signal
+                                            continue
+                                            
+                                        try:
+                                            # Parse the JSON data
+                                            parsed_data = json.loads(data)
+                                            
+                                            # Extract the content delta if available
+                                            if (
+                                                "choices" in parsed_data 
+                                                and parsed_data["choices"] 
+                                                and "delta" in parsed_data["choices"][0]
+                                                and "content" in parsed_data["choices"][0]["delta"]
+                                            ):
+                                                content = parsed_data["choices"][0]["delta"]["content"]
+                                                if content:
+                                                    # Stream the content
+                                                    yield content
+                                        except json.JSONDecodeError:
+                                            # Skip invalid JSON
+                                            continue
+                                
+                                # Exit the URL loop if successful
+                                break
+                
+                except Exception as e:
+                    console_log(f"Streaming error with URL {current_url}: {type(e).__name__}: {str(e)}")
+                    # Continue trying other URLs
+            
+            # If we couldn't get a successful stream, send a fallback message
+            if not success:
+                yield "我是AI助手，很抱歉OpenRouter API连接暂时不可用。请稍后再试或联系管理员检查API配置。"
+        
+        # Return a streaming response
+        return StreamingResponse(
+            stream_generator(),
+            media_type="text/plain"
+        )
+    
+    except Exception as e:
+        logger.error(f"Streaming outer exception handler caught: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Unexpected error: {str(e)}"
+        )
+
 # Add a direct test endpoint for debugging
 @router.get("/test-connection", status_code=200)
 async def test_api_connection():
